@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: [20, 22, 24]
+
+      - name: Синтаксис
+        run: node --check server.mjs
+
+      - name: Установка
+        run: npm install --no-audit --no-fund
+
+      - name: Модули компилируются и воркер поднимается
+        shell: pwsh
+        run: |
+          $w = 'worker.ps1'
+          $b = [System.IO.File]::ReadAllBytes($w)
+          if ($b[0] -ne 0xEF -or $b[1] -ne 0xBB -or $b[2] -ne 0xBF) {
+            Write-Error "$w обязан быть с BOM: Windows PowerShell 5.1 без BOM ломает кириллицу"
+            exit 1
+          }
+          $err = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $w), [ref]$null, [ref]$err)
+          if ($err) { $err | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          '{"id":1,"tool":"selftest","args":{}}' |
+            & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File $w
+
+      - name: Автопрогон
+        run: npm test

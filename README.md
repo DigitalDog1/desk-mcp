@@ -6,7 +6,17 @@ MCP-сервер управления рабочим столом Windows. 19 и
 Сделан потому, что встроенного computer-use у агента нет, а весь нужный набор —
 снимок экрана, клик, ввод, фокус окна, чтение дерева UI — это буквально WinAPI.
 
-## Установка в профиль
+## Установка
+
+```bash
+git clone https://github.com/<твой-аккаунт>/<твоё-имя-репозитория>.git
+cd <твоё-имя-репозитория>
+npm install
+```
+
+### В профиль
+
+`mcp.json`:
 
 Уже прописан в `mcp.json`:
 
@@ -16,7 +26,7 @@ MCP-сервер управления рабочим столом Windows. 19 и
     "desk-mcp": {
       "type": "stdio",
       "command": "node",
-      "args": ["C:\\Users\\DigitalJesus\\.minimax\\workspace\\desk-mcp\\server.mjs"],
+      "args": ["C:\\путь\\к\\репозиторию\\server.mjs"],
       "enabled": true
     }
   }
@@ -359,7 +369,7 @@ MIT. Идеи (MCP-обёртка + нативный хелпер) взяты и
 ## Проверка
 
 ```powershell
-cd C:\Users\DigitalJesus\.minimax\workspace\desk-mcp
+cd desk-mcp
 node smoke.mjs
 ```
 

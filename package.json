@@ -1,14 +1,31 @@
 {
   "name": "desk-mcp",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
-  "description": "MCP-сервер управления рабочим столом Windows (WinAPI + UI Automation + MSAA)",
-  "bin": { "desk-mcp": "server.mjs" },
+  "license": "MIT",
+  "description": "MCP-сервер управления рабочим столом Windows: UI Automation → MSAA → Chrome DevTools Protocol, OCR и ввод через WinAPI. Ноль внешних бинарных зависимостей.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "windows",
+    "computer-use",
+    "automation",
+    "ui-automation",
+    "accessibility",
+    "ocr",
+    "win32",
+    "windows11"
+  ],
   "engines": { "node": ">=20" },
+  "bin": { "desk-mcp": "server.mjs" },
+  "files": ["server.mjs", "worker.ps1", "bench.ps1", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node smoke.mjs",
+    "check": "node --check server.mjs"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
     "zod": "^3.25.0"
-  },
-  "scripts": { "start": "node server.mjs", "test": "node smoke.mjs" }
+  }
 }
