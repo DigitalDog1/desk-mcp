@@ -1117,12 +1117,12 @@ function Invoke-Tool {
                 $stoppedAt = $null
                 for ($i = 0; $i -lt $steps.Count; $i++) {
                     $s = $steps[$i]
-                    $tool = [string]$s.tool
+                    $stepTool = [string]$s.tool
                     $stepArgs = $s.args
                     if (-not $stepArgs) { $stepArgs = @{} }
                     try {
-                        $res = Invoke-Tool $tool $stepArgs
-                        $out += [ordered]@{ index = $i; tool = $tool; ok = $true; data = $res }
+                        $res = Invoke-Tool $stepTool $stepArgs
+                        $out += [ordered]@{ index = $i; tool = $stepTool; ok = $true; data = $res }
                         if ($s.stopOnError -eq $false) { continue }
                     } catch {
                         $out += [ordered]@{ index = $i; tool = $stepTool; ok = $false; error = $_.Exception.Message }

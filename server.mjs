@@ -10,7 +10,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import readline from "node:readline";
@@ -125,8 +124,15 @@ class Worker {
       }
       return;
     }
-    if (this.restarts > 5) {
-      throw new Error(`Воркер падает ${this.restarts} раз подряд — канал не восстановить`);
+    // Жёсткий отказ «канал не восстановить» был ловушкой: если висящее окно
+    // (1С, WPF, защищённое приложение) не уходит, шесть попыток — и все
+    // инструменты MCP-сервера мертвы до ручного перезапуска. Теперь это просто
+    // длинная пауза со сбросом: канал оживает при первой же возможности, даже
+    // после многих зависаний подряд.
+    if (this.restarts >= 5) {
+      this.restarts = 0;
+      process.stderr.write("[worker] много зависаний подряд — пауза 30 с и новая попытка\n");
+      await new Promise((r) => setTimeout(r, 30_000));
     }
     this.restarts++;
     const delay = Math.min(500 * 2 ** (this.restarts - 1), 8000);
@@ -398,7 +404,7 @@ server.registerTool(
                   "UIA не работает для Discord/Chrome/VSCode, пока они не запущены с --force-renderer-accessibility"),
     },
   },
-  R(async (a) => ok(await worker.call("read_screen", a, 60_000))),
+  R(async (a) => ok(await worker.call("read_screen", a, 30_000))),
 );
 
 server.registerTool(
@@ -503,7 +509,7 @@ server.registerTool(
       lang: z.string().optional().describe("например 'ru-RU' или 'en-US'; по умолчанию — язык профиля"),
     },
   },
-  R(async (a) => ok(await worker.call("ocr", a, 60_000))),
+  R(async (a) => ok(await worker.call("ocr", a, 45_000))),
 );
 
 server.registerTool(
@@ -524,7 +530,7 @@ server.registerTool(
       limit: z.number().int().min(1).max(50).optional().default(20),
     },
   },
-  R(async (a) => ok(await worker.call("find", a, 60_000))),
+  R(async (a) => ok(await worker.call("find", a, 30_000))),
 );
 
 server.registerTool(
@@ -543,7 +549,7 @@ server.registerTool(
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
-  R(async (a) => ok(await worker.call("invoke", a, 60_000))),
+  R(async (a) => ok(await worker.call("invoke", a, 30_000))),
 );
 
 server.registerTool(
@@ -563,7 +569,7 @@ server.registerTool(
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
-  R(async (a) => ok(await worker.call("set_value", a, 60_000))),
+  R(async (a) => ok(await worker.call("set_value", a, 30_000))),
 );
 
 server.registerTool(
@@ -576,7 +582,7 @@ server.registerTool(
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
-  R(async (a) => ok(await worker.call("select_text", a, 60_000))),
+  R(async (a) => ok(await worker.call("select_text", a, 30_000))),
 );
 
 server.registerTool(
@@ -602,7 +608,7 @@ server.registerTool(
       })).min(1).max(8),
     },
   },
-  R(async (a) => ok(await worker.call("verify", a, 60_000))),
+  R(async (a) => ok(await worker.call("verify", a, 30_000))),
 );
 
 server.registerTool(
