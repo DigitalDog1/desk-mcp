@@ -35,3 +35,5 @@ o*.txt
 bench*.png
 printwindow.png
 *.log
+
+publish.ps1
