@@ -203,6 +203,29 @@ Chromium заворачивает содержимое в 5 слоёв `PANEL` �
 моя — пиксели, произвольные регионы и автономность. Семантический слой перенесён
 выше, так что `desk-mcp` теперь закрывает обе задачи.
 
+### Chromium через Chrome DevTools Protocol
+
+| Тул | Что делает |
+|---|---|
+| `computer_browser_start` | Поднимает Chrome/Edge в debug-режиме с отдельным профилем и портом 9222 |
+| `computer_browser_list` | Вкладки: заголовок, URL, id |
+| `computer_browser_tree` | **Настоящий DOM**: интерактивные элементы с готовым CSS-селектором, текстом, role, value, checked, границами |
+| `computer_browser_descendants` | Содержимое контейнера по селектору, до 200 потомков |
+| `computer_browser_click` | Клик по селектору **с доказательством попадания** |
+| `computer_browser_eval` | Произвольный JS в контексте страницы |
+
+Зачем, если уже есть UIA и MSAA: обе для Chromium — костыль. UIA отдаёт обрезанное
+дерево в безымянных `PANEL`, MSAA — медленнее и без селекторов. CDP даёт то, чего
+не даёт ни один из них: готовый CSS-селектор и текст элемента.
+
+Верификация клика двумя независимыми способами, потому что проба в
+`window.__deskProbe` умирает вместе со страницей при переходе:
+
+```
+verified=true via=navigation   https://example.com/ -> https://www.iana.org/help/example-domains
+verified=true via=probe        hit={"tag":"A","text":"ТестКнопка","trusted":true}
+```
+
 ## Сравнение с тем, что уже есть на GitHub
 
 Ниша computer-use MCP на Windows не пустая, и там есть крупнее:
@@ -216,12 +239,18 @@ Chromium заворачивает содержимое в 5 слоёв `PANEL` �
 | [computer-control-mcp](https://github.com/AB498/computer-control-mcp) | — | Python, PyAutoGUI + OCR | 70 МБ моделей при первом запуске |
 | [winremote-mcp](https://github.com/dddabtc/winremote-mcp) | 40+ | Python, remote | управление удалёнными Windows |
 
-**Чем этот отличается:** он единственный из найденных, кто при пустом UIA-дереве
-откатывается на **MSAA**. Все остальные читают только UIA — а Chromium-приложения
-(Discord, Chrome, VS Code, Slack) отдают UIA лишь с `--force-renderer-accessibility`.
-Без флага окно выглядит пустым листом. Плюс ноль бинарных зависимостей: ни
-`uvx`/Python, ни Rust NAPI, ни 70 МБ OCR-моделей — только Node и PowerShell,
-которые есть в системе.
+**Чем этот отличается:** у Windows-MCP тоже есть `tree/ia2.py` — MSAA-фоллбэк
+придуман не здесь, и врать об этом не надо. Реальные отличия:
+
+1. **Три слоя чтения подряд.** UIA → MSAA → **CDP**. Для Chromium последний
+   даёт настоящий DOM с селекторами; у Windows-MCP и computer-use-mcp читается
+   только UIA, у computer-control-mcp — вообще пиксели плюс OCR.
+2. **Верификация действий встроена.** `computer_verify_state` для нативных окон,
+   проба + контроль URL для веб-страниц. У конкурентов клик считается успешным,
+   если отправлен.
+3. **Ноль бинарных зависимостей:** ни `uvx`/Python, ни Rust NAPI, ни 70 МБ OCR.
+4. **37 тулов из коробки**, включая семантические (`find`/`invoke`/`set_value`) и
+   CDP-режим.
 
 ## Что на GitHub не выкладывается, а выкладывается
 

@@ -7,7 +7,10 @@
  * консоли. Воркер один на весь сессионный жизненный цикл — иначе каждый вызов
  * платил бы ~1.5 с на старт PowerShell и компиляцию Add-Type.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import readline from "node:readline";
@@ -565,6 +568,393 @@ server.registerTool(
   "computer_cursor",
   { title: "Позиция курсора", description: "Где сейчас курсор мыши.", inputSchema: {} },
   R(async () => ok(await worker.call("cursor", {}))),
+);
+
+// --- Chrome DevTools Protocol ---------------------------------------------------
+// UIA и MSAA для Chromium — костыль: Chromium отдаёт обрезанное дерево, обвязанное
+// безымянными PANEL'ами. CDP даёт настоящий DOM: стабильные селекторы, текст,
+// роли из accessibility tree самого браузера. Это единственный способ работать с
+// веб-контентом не по пикселям.
+const cdp = {
+  port: 9222,
+  nextId: 1,
+  sockets: new Map(),
+
+  async http(path) {
+    const res = await fetch(`http://127.0.0.1:${cdp.port}${path}`, { signal: AbortSignal.timeout(4000) });
+    return res.json();
+  },
+
+  async version() {
+    return cdp.http("/json/version");
+  },
+
+  async targets() {
+    const list = await cdp.http("/json/list");
+    return list.filter((t) => t.type === "page" && t.webSocketDebuggerUrl);
+  },
+
+  async socket(target) {
+    const key = target.id ?? target.url;
+    if (cdp.sockets.has(key)) return cdp.sockets.get(key);
+    const ws = new WebSocket(target.webSocketDebuggerUrl);
+    // Карта pending обязана быть одна и та же у обработчика ответов и у send.
+    // Раньше обработчик смотрел в локальную pending, а send писал в
+    // client.pending — две разные карты, ответы молча терялись и каждый вызов
+    // висел до таймаута.
+    const client = { ws, pending: new Map(), send: null };
+    await new Promise((resolve, reject) => {
+      ws.addEventListener("open", resolve, { once: true });
+      ws.addEventListener("error", () => reject(new Error("Не удалось подключиться к CDP")), { once: true });
+    });
+    client.send = (method, params) => cdp.send(client, method, params);
+    ws.addEventListener("message", (ev) => {
+      let msg;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      const entry = client.pending.get(msg.id);
+      if (!entry) return;
+      client.pending.delete(msg.id);
+      if (msg.error) entry.reject(new Error(`${msg.error.message} (${msg.error.code})`));
+      else entry.resolve(msg.result);
+    });
+    ws.addEventListener("close", () => cdp.sockets.delete(key));
+    cdp.sockets.set(key, client);
+    return client;
+  },
+
+  send(client, method, params = {}) {
+    const id = cdp.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        client.pending.delete(id);
+        reject(new Error(`CDP: ${method} не ответил за 15 с`));
+      }, 15_000);
+      client.pending.set(id, {
+        resolve: (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
+      client.ws.send(JSON.stringify({ id, method, params }));
+    });
+  },
+
+  async evaluate(client, expression) {
+    const r = await client.send("Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+    if (r.exceptionDetails) {
+      throw new Error(r.exceptionDetails.exception?.description ?? "JS бросил исключение");
+    }
+    return r.result?.value;
+  },
+
+  async pickTarget(urlHint) {
+    const targets = await cdp.targets();
+    if (!targets.length) throw new Error("Нет ни одной вкладки — сначала computer_browser_start");
+    if (!urlHint) return targets[0];
+    const hit = targets.find((t) => t.url.includes(urlHint));
+    if (!hit) {
+      throw new Error(`Вкладка с '${urlHint}' не найдена. Есть: ${targets.map((t) => t.title).join(" | ")}`);
+    }
+    return hit;
+  },
+};
+
+const PROBE_JS = `(() => {
+  window.__deskProbe = [];
+  if (!window.__deskProbeHooked) {
+    window.__deskProbeHooked = true;
+    document.addEventListener("click", (e) => {
+      const el = e.target;
+      window.__deskProbe.push({
+        tag: el.tagName,
+        text: (el.innerText || el.value || el.getAttribute("aria-label") || "").toString().slice(0, 120),
+        id: el.id || null,
+        testid: el.getAttribute("data-testid"),
+        trusted: e.isTrusted
+      });
+    }, true);
+  }
+  return "armed";
+})()`;
+
+const READ_PROBE_JS = `JSON.stringify(window.__deskProbe || [])`;
+
+const TREE_JS = `(() => {
+  const SEL = 'a,button,input,select,textarea,summary,[role=button],[role=link],[role=tab],[role=menuitem],[role=checkbox],[role=switch],[role=combobox],[contenteditable=true],[onclick]';
+  // a:nth-of-type(9) вне контекста родителя не находит ничего — индекс
+  // считается среди соседей конкретного родителя. Поэтому строим абсолютный
+  // путь вверх через :nth-child, он работает в document.querySelector.
+  const pathOf = (el) => {
+    const parts = [];
+    let cur = el;
+    for (let i = 0; cur && cur.nodeType === 1 && i < 6; i++) {
+      const parent = cur.parentElement;
+      if (!parent) { parts.unshift(cur.tagName.toLowerCase()); break; }
+      const idx = [...parent.children].indexOf(cur) + 1;
+      parts.unshift(cur.tagName.toLowerCase() + ":nth-child(" + idx + ")");
+      if (cur === document.body) break;
+      cur = parent;
+    }
+    return parts.join(" > ");
+  };
+  const out = [];
+  for (const el of document.querySelectorAll(SEL)) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) continue;
+    if (r.bottom < 0 || r.top > innerHeight) continue;
+    const testid = el.getAttribute("data-testid");
+    const selector = el.id
+      ? "#" + CSS.escape(el.id)
+      : (testid ? '[data-testid="' + testid.replace(/"/g, '\\\\"') + '"]' : pathOf(el));
+    out.push({
+      tag: el.tagName.toLowerCase(),
+      role: el.getAttribute("role") || null,
+      text: (el.innerText || el.value || el.getAttribute("aria-label") || el.title || "").toString().trim().slice(0, 120),
+      selector,
+      matches: document.querySelectorAll(selector).length,
+      id: el.id || null,
+      testid: testid || null,
+      name: el.getAttribute("name") || null,
+      value: (el.value ?? null),
+      checked: el.checked ?? null,
+      disabled: !!el.disabled,
+      rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }
+    });
+    if (out.length >= 400) break;
+  }
+  return JSON.stringify(out);
+})()`;
+
+const DESCENDANTS_JS = (selector) => `(() => {
+  const root = document.querySelector(${JSON.stringify(selector)});
+  if (!root) return "NULL";
+  const out = [];
+  for (const el of root.querySelectorAll("*")) {
+    const r = el.getBoundingClientRect();
+    const text = (el.innerText || "").toString().trim().slice(0, 80);
+    if (r.width < 2 || r.height < 2) continue;
+    out.push({ tag: el.tagName.toLowerCase(), role: el.getAttribute("role") || null, text, rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } });
+    if (out.length >= 200) break;
+  }
+  return JSON.stringify({ root: { tag: root.tagName.toLowerCase(), text: (root.innerText || "").toString().trim().slice(0, 300) }, children: out });
+})()`;
+
+server.registerTool(
+  "computer_browser_start",
+  {
+    title: "Запустить браузер с CDP",
+    description:
+      "Поднимает Chrome или Edge в debug-режиме с отдельным профилем и портом 9222, " +
+      "чтобы читать DOM через Chrome DevTools Protocol. Основной профиль не трогается. " +
+      "Если браузер уже запущен с debug-портом, просто подключится к нему.",
+    inputSchema: {
+      browser: z.enum(["auto", "chrome", "edge"]).optional().default("auto"),
+      port: z.number().int().min(1024).max(65535).optional().default(9222),
+      url: z.string().optional().describe("открыть адрес сразу после подъёма"),
+      exe: z.string().optional().describe("явный путь к браузеру, если автоопределение не сработало"),
+    },
+  },
+  R(async (a) => {
+    cdp.port = a.port ?? 9222;
+    try {
+      const v = await cdp.version();
+      return ok({ ok: true, alreadyRunning: true, browser: v.Browser, port: cdp.port });
+    } catch { /* нужно поднимать */ }
+    const pf86 = process.env[["ProgramFiles", "(x86)"].join("")] ?? "C:\\Program Files (x86)";
+    const candidates = {
+      chrome: [
+        `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${pf86}\\Google\\Chrome\\Application\\chrome.exe`,
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      ],
+      edge: [
+        `${pf86}\\Microsoft\\Edge\\Application\\msedge.exe`,
+        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+      ],
+    };
+    const order = a.browser === "auto" ? ["chrome", "edge"] : [a.browser];
+    let exe = a.exe ?? null;
+    const tried = [];
+    if (!exe) {
+      for (const k of order) {
+        for (const p of candidates[k] ?? []) {
+          tried.push(`${p} [${existsSync(p) ? "да" : "нет"}]`);
+          if (existsSync(p)) { exe = p; break; }
+        }
+        if (exe) break;
+        // последний рубеж: спрашиваем сам Windows, где лежит браузер
+        for (const bin of k === "chrome" ? ["chrome.exe", "msedge.exe"] : ["msedge.exe"]) {
+          try {
+            const r = spawnSync("where.exe", [bin], { encoding: "utf8" });
+            const hit = (r.stdout || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+            if (hit && existsSync(hit)) { exe = hit; tried.push(`${bin} через where -> ${hit}`); break; }
+          } catch { /* where может отсутствовать в PATH */ }
+        }
+        if (exe) break;
+      }
+    }
+    if (!exe) throw new Error(`Не найден ни Chrome, ни Edge. Проверено: ${tried.join(" | ")}`);
+
+    const profile = join(tmpdir(), "desk-mcp-cdp-profile");
+    mkdirSync(profile, { recursive: true });
+    const args = [
+      `--remote-debugging-port=${cdp.port}`,
+      `--user-data-dir=${profile}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "about:blank",
+    ];
+    if (a.url) args[args.length - 1] = a.url;
+    const child = spawn(exe, args, { detached: true, stdio: "ignore" });
+    child.unref();
+
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 400));
+      try {
+        const v = await cdp.version();
+        return ok({ ok: true, started: true, browser: v.Browser, port: cdp.port, profile });
+      } catch { /* ждём */ }
+    }
+    throw new Error(`CDP не поднялся за 12 с на порту ${cdp.port}`);
+  }),
+);
+
+server.registerTool(
+  "computer_browser_list",
+  {
+    title: "Вкладки CDP",
+    description: "Список вкладок браузера с CDP: заголовок, URL, id. Плюс версия браузера.",
+    inputSchema: {},
+  },
+  R(async () => {
+    const [v, t] = [await cdp.version(), await cdp.targets()];
+    return ok({ browser: v.Browser, port: cdp.port, tabs: t.map((x) => ({ id: x.id, title: x.title, url: x.url })) });
+  }),
+);
+
+server.registerTool(
+  "computer_browser_tree",
+  {
+    title: "DOM-дерево вкладки",
+    description:
+      "Настоящее DOM-дерево: интерактивные элементы с готовым CSS-селектором, текстом, " +
+      "role, value, checked и границами. В отличие от UIA/MSAA для Chromium это точные " +
+      "данные без прокладок. Селектор сразу годится для computer_browser_click.",
+    inputSchema: { url: z.string().optional().describe("подстрока URL вкладки; пусто — первая") },
+  },
+  R(async (a) => {
+    const target = await cdp.pickTarget(a.url);
+    const client = await cdp.socket(target);
+    const raw = await cdp.evaluate(client, TREE_JS);
+    const items = JSON.parse(raw);
+    return ok({ url: target.url, title: target.title, count: items.length, elements: items });
+  }),
+);
+
+server.registerTool(
+  "computer_browser_descendants",
+  {
+    title: "Поддерево элемента",
+    description: "Содержимое контейнера по CSS-селектору: до 200 потомков с границами. " +
+      "Нужен, чтобы понять структуру блока, списка или модалки перед кликом.",
+    inputSchema: { selector: z.string(), url: z.string().optional() },
+  },
+  R(async (a) => {
+    const target = await cdp.pickTarget(a.url);
+    const client = await cdp.socket(target);
+    const raw = await cdp.evaluate(client, DESCENDANTS_JS(a.selector));
+    if (raw === "NULL") throw new Error(`Селектор не найден: ${a.selector}`);
+    return ok({ url: target.url, ...JSON.parse(raw) });
+  }),
+);
+
+server.registerTool(
+  "computer_browser_click",
+  {
+    title: "Клик по элементу страницы",
+    description:
+      "Кликает по CSS-селектору ЧЕРЕЗ CDP и проверяет результат: перед кликом в страницу " +
+      "ставится проба, которая ловит событие, после клика читается, что именно приняло удар. " +
+      "Возвращает verified true только если событие дошло до элемента.",
+    inputSchema: {
+      selector: z.string(),
+      url: z.string().optional(),
+      button: z.enum(["left", "middle", "right"]).optional().default("left"),
+      clickCount: z.number().int().min(1).max(3).optional().default(1),
+    },
+  },
+  R(async (a) => {
+    const target = await cdp.pickTarget(a.url);
+    const client = await cdp.socket(target);
+    await cdp.evaluate(client, PROBE_JS);
+    const before = await cdp.evaluate(client, "location.href");
+
+    const raw = await cdp.evaluate(client, `(() => {
+        const el = document.querySelector(${JSON.stringify(a.selector)});
+        if (!el) return "NULL";
+        el.scrollIntoView({ block: "center", inline: "center" });
+        const r = el.getBoundingClientRect();
+        return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
+      })()`);
+    if (raw === "NULL") throw new Error(`Селектор не найден: ${a.selector}`);
+    const box = JSON.parse(raw);
+
+    for (let i = 0; i < a.clickCount; i++) {
+      await client.send("Input.dispatchMouseEvent", {
+        type: "mousePressed", x: box.x, y: box.y, button: a.button, clickCount: 1,
+      });
+      await client.send("Input.dispatchMouseEvent", {
+        type: "mouseReleased", x: box.x, y: box.y, button: a.button, clickCount: 1,
+      });
+      if (i + 1 < a.clickCount) await new Promise((r) => setTimeout(r, 60));
+    }
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Проба живёт в window.__deskProbe и умирает вместе со страницей при
+    // переходе — то есть ровно на самом интересном случае клика. Поэтому
+    // вторым доказательством служит смена адреса: страница уехала = клик
+    // гарантированно попал.
+    const hits = JSON.parse(await cdp.evaluate(client, READ_PROBE_JS));
+    const after = await cdp.evaluate(client, "location.href");
+    const navigated = before !== after;
+    return ok({
+      ok: true,
+      selector: a.selector,
+      verified: hits.length > 0 || navigated,
+      via: hits.length > 0 ? "probe" : navigated ? "navigation" : "none",
+      hit: hits[0] ?? null,
+      urlBefore: before,
+      urlAfter: after,
+    });
+  }),
+);
+
+server.registerTool(
+  "computer_browser_eval",
+  {
+    title: "Выполнить JS на странице",
+    description:
+      "Выполняет произвольный JS в контексте страницы (await поддерживается) и возвращает " +
+      "значение. Для чтения того, что не отдаёт DOM-дерево, и для проверок в консоли.",
+    inputSchema: { expression: z.string(), url: z.string().optional() },
+  },
+  R(async (a) => {
+    const target = await cdp.pickTarget(a.url);
+    const client = await cdp.socket(target);
+    return ok({ url: target.url, value: await cdp.evaluate(client, a.expression) });
+  }),
 );
 
 // --- запуск -------------------------------------------------------------------

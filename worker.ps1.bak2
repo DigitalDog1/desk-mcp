@@ -23,6 +23,7 @@ public class DeskMcp {
     [DllImport("user32.dll")] public static extern IntPtr SetActiveWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+    // out-параметр для PidOf: та же функция, но тип pid — int, а не IntPtr.
     [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")]
     static extern uint GetWindowThreadProcessIdPid(IntPtr h, out int pid);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
@@ -58,6 +59,8 @@ public class DeskMcp {
 
     public static int Size() { return Marshal.SizeOf(typeof(INPUT)); }
 
+    // Имя Move в PowerShell 5.1 приводит к RuntimeException при вызове
+    // [DeskMcp]::MoveTo(...) — конфликт с провайдером FileSystem. Поэтому MoveTo.
     public static void MoveTo(int x, int y) { SetCursorPos(x, y); }
 
     public static void Click(string button, int count) {
@@ -127,6 +130,8 @@ public class DeskMcp {
         return (int)SendInput(1, new INPUT[] { i }, Size());
     }
 
+    // Фокус окна с проглаживанием ATTACHTHREADINPUT: одному SetForegroundWindow
+    // Windows регулярно отказывает, и тишина выглядит как "всё сработало".
     public static int PidOf(IntPtr h) {
         int pid = 0;
         GetWindowThreadProcessIdPid(h, out pid);
@@ -206,6 +211,12 @@ public static class MsTree {
     }
 
     static bool IsInteractive(int role) {
+        // Нумерация MSAA, которую реально отдают и нативные окна, и Chromium.
+        // Chromium смешивает старую (OLE 1.0) и новую (OLE 2.0) нумерацию:
+        // кнопка приходит как 43, а как 22, ссылка как 41, пункт списка как
+        // 29. Поэтому список покрывает обе. Прежний набор не содержал
+        // 22/24/25/41/42/46 — то есть настоящие кнопки, чекбоксы и ссылки
+        // в него не попадали и при interactiveOnly выкидывались.
         switch (role) {
             case 2: case 3: case 4: case 5: case 7: case 8:
             case 12: case 14: case 21: case 22: case 23: case 24:
@@ -218,6 +229,11 @@ public static class MsTree {
         }
     }
 
+    // Безымянные прокладки Chromium нанизывает десятками (5 PANEL + SCROLLPANE
+    // + CLIENT, а внутри — ROLE_SYSTEM_GROUPING на каждый контейнер). В JSON
+    // они превращаются в одинаковые пустые объекты и съедают бюджет
+    // элементов, поэтому разворачиваем: вместо прокладки идут её дети.
+    // 20 = ROLE_SYSTEM_GROUPING, тоже пустая обвязка.
     static bool IsWrapper(MsNode n) {
         int r = n.roleCode;
         return string.IsNullOrEmpty(n.name)
@@ -248,6 +264,10 @@ public static class MsTree {
             node.x = l; node.y = t; node.w = w; node.h = h;
         } catch { }
 
+        // Прокладки в счётчик maxElements не идут: Chromium нанизывает их
+        // десятками, и при учёте они съедают весь бюджет раньше, чем обход
+        // дойдёт до кнопок. Глубину ограничивает maxDepth, а против
+        // бесконечного обхода — жёсткий лимит посещённых узлов.
         if (!IsWrapper(node)) {
             if (counter >= maxElements) return null;
             counter++;
@@ -281,8 +301,17 @@ public static class MsTree {
                 } catch { }
             }
         }
+        // interactiveOnly фильтрует только листья: контейнеры оставляем, иначе
+        // теряется структура, а именно в контейнерах сидят вложенные кнопки.
+        // usefulCount считаем здесь же, в C#: обратно в PowerShell узлы
+        // отдаются как OrderedDictionary, а доступ к ключу по «свойству»
+        // в PS 5.1 ненадёжен — там тихо возвращается $null.
         node.usefulCount = 0;
         foreach (MsNode kid in kids) {
+            // Полезен узел с непустым именем, если он не прокладка:
+            // 16=PANEL, 15=SCROLLPANE, 10=CLIENT, 0=нет роли. Именно эти
+            // безымянные/служебные слои Chromium нанизывает пачками, и они
+            // обводят авто-ретрай по глубине, не доходя до настоящих кнопок.
             int r = kid.roleCode;
             bool skip = (r == 16 || r == 15 || r == 10 || r == 0);
             if (!skip && !string.IsNullOrEmpty(kid.name)) node.usefulCount++;
@@ -292,6 +321,9 @@ public static class MsTree {
         return node;
     }
 
+    // Наружу отдаём готовые узлы, а не IAccessible: RCW при возврате в
+    // PowerShell теряет интерфейс (приходит System.__ComObject), и приведение
+    // к Accessibility.IAccessible падает. Всю работу с COM держим внутри C#.
     public static MsNode TreeForWindow(IntPtr hwnd, int maxDepth, int maxElements, bool interactiveOnly) {
         Accessibility.IAccessible acc = FromWindow(hwnd);
         if (acc == null) return null;

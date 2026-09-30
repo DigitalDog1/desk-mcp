@@ -80,6 +80,23 @@ await check("computer_mouse_button", { button: "left", down: false });
 await check("computer_cursor", {}, (r, t) => t.includes('"x"'));
 await check("computer_click", { x: 1300, y: 720, modifiers: ["ctrl"] }, (r, t) => t.includes("ctrl"));
 
+console.log("== Chromium через CDP ==");
+const bs = await check("computer_browser_start", { browser: "edge", url: "https://example.com" },
+  (r, t) => t.includes('"ok": true'));
+await new Promise((r) => setTimeout(r, 2000));
+const bl = await check("computer_browser_list", {}, (r, t) => t.includes("tabs"));
+const bt = await check("computer_browser_tree", {}, (r, t) => t.includes('"selector"'));
+await check("computer_browser_eval", { expression: "document.title" }, (r, t) => t.includes("value"));
+await check("computer_browser_descendants", { selector: "body" }, (r, t) => t.includes("children"));
+const tabs = JSON.parse(bl ? bl.content[0].text : "{}");
+const el = JSON.parse(bt ? bt.content[0].text : "{}");
+if ((el.elements || []).length) {
+  await check("computer_browser_click", { selector: el.elements[0].selector },
+    (r, t) => t.includes('"verified": true'));
+}
+console.log("  вкладок: " + (tabs.tabs || []).length + ", интерактивных элементов: " + (el.elements || []).length);
+void bs;
+
 console.log("== буфер ==");
 await check("computer_clipboard_set", { text: "проверка" });
 await check("computer_clipboard_get", {}, (r, t) => t.includes("проверка"));
@@ -95,6 +112,8 @@ const neg = [
   ["computer_verify_state", { title: "Microsoft", expect: [] }],
   ["computer_key_down", { key: "ZZZнеттакой" }],
   ["computer_wait", { ms: 999999 }],
+  ["computer_browser_tree", { url: "нет-такой-вкладки" }],
+  ["computer_browser_click", { selector: "#нет-такого-элемента" }],
   ["computer_click", { x: 1, y: 1, modifiers: ["nosuchmod"] }],
 ];
 for (const [n, a] of neg) {
