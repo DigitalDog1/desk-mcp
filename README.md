@@ -1,51 +1,59 @@
 # desk-mcp
 
-![три слоя чтения](docs/layers.png)
+<p align="center">
+  <a href="README.md">English</a> &nbsp;|&nbsp; <a href="README.ru.md">Русский</a>
+</p>
 
-MCP-сервер для автоматизации рабочего стола Windows: снимки экрана, OCR,
-мышь и клавиатура, а также деревья доступности из UI Automation, MSAA и
-Chrome DevTools Protocol. Работает на Node.js и встроенном в Windows
-PowerShell — без Python, без `uvx`, без нативных модулей.
+![the three read layers](docs/layers.png)
+
+MCP server for automating the Windows desktop: screenshots, OCR, mouse and
+keyboard, and accessibility trees from UI Automation, MSAA and Chrome DevTools
+Protocol. Runs on Node.js and the PowerShell that ships with Windows — no
+Python, no `uvx`, no native modules.
 
 ![computer_find](docs/find.png)
 
-## Что умеет
+## What it does
 
-**Глаза**
-- `computer_screenshot` — экран, произвольная область или конкретное окно
-  (через `PrintWindow`, работает на перекрытом и свёрнутом окне), масштабирование, PNG и JPEG.
-- `computer_ocr` — текст прямо из пикселей через движок, встроенный в Windows
-  (`Windows.Media.Ocr`, ru/en). Слова и строки с границами, по границе можно кликнуть.
+**Eyes**
+- `computer_screenshot` — the whole screen, an arbitrary region, or a specific
+  window (via `PrintWindow`, so it works on occluded and minimized windows);
+  scaling, PNG and JPEG.
+- `computer_ocr` — text straight from pixels, using the OCR engine built into
+  Windows (`Windows.Media.Ocr`, ru/en). Words and lines come back with
+  bounding boxes, so you can click on what was read.
 
-**Дерево интерфейса**
-- `computer_read_screen` — UI Automation, с автоматическим откатом на MSAA
-  и наращиванием глубины обхода.
-- `computer_find` — поиск элемента по имени, роли или `automationId`.
-- `computer_element_at` — что находится в точке.
-- `computer_browser_tree` — DOM страницы с готовыми CSS-селекторами (CDP).
+**Interface tree**
+- `computer_read_screen` — UI Automation, with automatic fallback to MSAA and
+  automatic growth of the traversal depth.
+- `computer_find` — find an element by name, role or `automationId`.
+- `computer_element_at` — what is at a given point.
+- `computer_browser_tree` — the page DOM with ready-to-use CSS selectors (CDP).
 
-**Руки**
-- `computer_click` (с модификаторами), `computer_move`, `computer_drag`, `computer_scroll`,
+**Hands**
+- `computer_click` (with modifiers), `computer_move`, `computer_drag`, `computer_scroll`,
   `computer_mouse_button`, `computer_type`, `computer_key`, `computer_key_down` / `_up`, `computer_wait`.
-- `computer_invoke` — жмёт через `InvokePattern` **без захвата мыши** и без смены фокуса.
-- `computer_set_value` — пишет значение через `ValuePattern` без фокуса.
-- `computer_batch` — до 50 инструментов за один вызов, с остановкой на первой ошибке.
+- `computer_invoke` — presses through `InvokePattern` **without capturing the mouse**
+  and without bringing the window forward.
+- `computer_set_value` — writes through `ValuePattern` without focus.
+- `computer_batch` — up to 50 tools in a single call, stopping at the first error.
 
-**Окна**
+**Windows**
 - `computer_windows`, `computer_focus`, `computer_wait_window`, `computer_active_window`,
   `computer_window_set_frame`, `computer_close_window`, `computer_launch`.
-- `computer_desktop` — виртуальные рабочие столы там, где ОС их поддерживает.
+- `computer_desktop` — virtual desktops, on the builds of Windows that have them.
 
-**Проверка**
-- `computer_verify_state` — предикаты: существует / `value_equals` / `enabled` / `selected`.
-  `unknown` честно отличается от успеха.
-- `computer_browser_click` возвращает доказательство попадания: проба внутри
-  страницы **или** смена URL.
-- `computer_selftest` — проверяет канал целиком.
+**Verification**
+- `computer_verify_state` — predicates: exists / `value_equals` / `enabled` / `selected`.
+  `unknown` is reported honestly and is not success.
+- `computer_browser_click` returns evidence that the click landed: an in-page
+  probe **or** a URL change.
+- `computer_selftest` — checks the whole channel at once.
 
-Всего 41 инструмент. Схема и описания: `node server.mjs`, либо любой MCP-клиент.
+41 tools in total. Schema and descriptions: run `node server.mjs`, or connect any
+MCP client.
 
-## Установка
+## Install
 
 ```bash
 git clone https://github.com/DigitalDog1/desk-mcp.git
@@ -53,10 +61,10 @@ cd desk-mcp
 npm install
 ```
 
-Требуется Node.js 20+ и Windows 10 1809 / 11. PowerShell дополнительно не
-ставить не нужно — он в системе.
+Requires Node.js 20+ and Windows 10 1809 / 11. No PowerShell install needed —
+it is already there.
 
-### Подключение
+### Connect
 
 `mcp.json`:
 
@@ -65,105 +73,105 @@ npm install
   "mcpServers": {
     "desk-mcp": {
       "command": "node",
-      "args": ["C:\\путь\\к\\desk-mcp\\server.mjs"]
+      "args": ["C:\\path\\to\\desk-mcp\\server.mjs"]
     }
   }
 }
 ```
 
-## Устройство
+## How it works
 
 ```
-server.mjs   MCP-сервер на Node, stdio, CDP-клиент
+server.mjs   MCP server in Node, stdio, CDP client
 worker.ps1   long-running PowerShell: user32, UI Automation, MSAA, OCR
 ```
 
-Воркер один на весь жизненный цикл сервера, а не процесс на вызов: PowerShell
-поднимается около 400 мс, а `Add-Type` компилирует C# дольше. Обмен
-построчный, ответы в base64 — иначе кириллица ломается на кодовой странице
-консоли.
+One worker for the whole life of the server, not a process per call: PowerShell
+takes about 400 ms to start, and `Add-Type` takes longer still to compile the C#.
+The exchange is line-based with base64 responses — otherwise Cyrillic breaks on
+the console code page.
 
-## Три слоя чтения
+## The three read layers
 
-Порядок выбран потому, что для Chromium первые два бесполезны: UIA отдаёт
-дерево, обвязанное безымянными `PANEL`, и только с флагом
-`--force-renderer-accessibility`. Пустое дерево — не ошибка, а сигнал
-переключиться на следующий слой.
+The order matters, because for Chromium the first two are nearly useless: UIA
+returns a tree wrapped in nameless `PANEL` elements, and only when Chromium was
+started with `--force-renderer-accessibility`. An empty tree is not an error, it
+is the signal to fall through to the next layer.
 
-| Слой | Что даёт |
+| Layer | What it gives |
 |---|---|
-| UIA | нативные окна: точные `automationId`, паттерны, границы |
-| MSAA | `oleacc`, когда UIA пустая, с автоматическим наращиванием глубины |
-| CDP | настоящий DOM страницы с готовыми CSS-селекторами |
+| UIA | native windows: exact `automationId`, patterns, bounds |
+| MSAA | `oleacc`, used when UIA came back empty, with depth growing automatically |
+| CDP | the real page DOM with ready-to-use CSS selectors |
+
+## How to work with it
 
 ![computer_ocr](docs/ocr.png)
 
-## Правило работы
+The most expensive mistake is not "the tool didn't work", it is "the tool worked,
+but not on the right thing". So the loop is: **observe → act by meaning → verify**.
+`computer_invoke` may come back with `via: "pixel"`, which means there was no
+pattern and the click went to the center of the bounds — treat the result with
+more suspicion. A tool that found nothing refuses honestly: that is a finding,
+not a reason to click blind coordinates.
 
-Ошибка, которая дороже всего стоит, — не «тул не сработал», а «тул сработал,
-но не туда». Поэтому цикл: **наблюдай → действуй по смыслу → проверяй**.
-`computer_invoke` может вернуть `via: "pixel"` — это значит, что паттерна не
-было, клик ушёл по центру границ, и результат стоит проверить внимательнее.
-Тул, который ничего не нашёл, честно отказывается: это находка, а не повод
-бить по координатам.
+## Safety
 
-## Безопасность
+`computer_close_window` and `computer_launch` are destructive and irreversible.
+Both require an explicit `confirm: true` and refuse without it. Text on screen
+is untrusted data, not instructions.
 
-`computer_close_window` и `computer_launch` — разрушительные и необратимые
-действия. Оба требуют явного `confirm: true` и без него возвращают отказ.
-Текст на экране — недоверенные данные, а не инструкции.
+## Limitations
 
-## Ограничения
+- **Exclusive fullscreen** (games, video): `CopyFromScreen` returns black.
+  This needs DXGI Desktop Duplication.
+- **UWP windows** expose neither a UIA nor an MSAA tree.
+- **Virtual desktops** depend on the Windows build: on 10 19035
+  `VirtualDesktopManager.dll` is absent and the tool returns an error.
+- **The worker is single-threaded**: a hung UIA call blocks the queue. The
+  treatment is a 30 s timeout, killing the process and restarting it.
 
-- **Эксклюзивный полный экран** (игры, видео): `CopyFromScreen` даёт чёрное.
-  Нужен DXGI Desktop Duplication.
-- **UWP-окна** не отдают ни UIA-, ни MSAA-дерево.
-- **Виртуальные рабочие столы** зависят от сборки Windows: на 10 19035
-  `VirtualDesktopManager.dll` отсутствует, инструмент вернёт ошибку.
-- **Воркер однопоточный**: зависший вызов UIA глушит очередь. Лечение —
-  таймаут 30 с, убийство процесса и авто-рестарт.
-
-## Проверка
+## Tests
 
 ```bash
 npm test
 ```
 
-Ожидаемый хвост: `ИТОГ: 39 ок, 0 провалов`. Автопрогон **не двигает курсор** —
-только чтение: снимки, окна, деревья, OCR, буфер, CDP-чтение.
+Expected tail: `ИТОГ: 39 ок, 0 провалов`. The suite **does not move the
+cursor** — read-only: screenshots, windows, trees, OCR, clipboard, CDP reads.
 
-## Ловушки Windows
+## Windows gotchas
 
-Всё ниже воспроизведено на практике, а не взято из документации.
+Everything below was reproduced in practice, not taken from documentation.
 
-- `.ps1` обязан быть в UTF-8 **с BOM**: без него PowerShell 5.1 читает файл
-  как ANSI и молча ломает разбор кириллицы.
-- В `KEYBDINPUT` поля — `ushort`, а не `uint`. Объявишь `uint` — структура
-  станет 32 байта вместо 24, `dwFlags` уезжает, и `SendInput` не падает,
-  не ругается, не возвращает ошибку. Он молча ничего не делает.
-- В PowerShell типа `[ushort]` не существует, нужно `[uint16]`.
-- Статический C#-метод нельзя назвать `Move` или `Wheel`: вызов падает с
-  «does not contain a method named…». Обойдено именами `MoveTo`/`ScrollWheel`.
-- `SendKeys` не берёт кириллицу вообще. Только `SendInput` +
-  `KEYEVENTF_UNICODE`.
-- `ConvertTo-Json -Depth` для дерева UI нужен **больше 12**: узел — это
-  примерно два уровня вложенности, и при малой глубине вместо объекта
-  молча подставляется строка с именем .NET-типа.
-- У элементов UIA границы бывают бесконечными — приводить к `Int32` надо
-  с проверкой на `IsInfinity` и `NaN`.
-- COM-объекты (`AutomationElement`) кэшировать нельзя: протухают при
-  перерисовке дерева. Кэшируются только идентификаторы, перед действием
-  делается свежий поиск.
-- Синхронные методы `Add-Type` компилируются как C# 5: никакой
-  интерполяции строк `$"..."`.
-- Криптографию с base64-строками из интерполяции лучше не путать:
-  `"$Owner`:$Token"` превращается в `$Owner:` и PowerShell ищет scoped-переменную.
+- A `.ps1` file must be UTF-8 **with BOM**: without it, PowerShell 5.1 reads
+  the file as ANSI and silently breaks parsing of Cyrillic.
+- In `KEYBDINPUT` the fields are `ushort`, not `uint`. Declare `uint` and the
+  struct becomes 32 bytes instead of 24, `dwFlags` ends up in the wrong place,
+  and `SendInput` neither fails, nor complains, nor returns an error. It
+  silently does nothing.
+- PowerShell has no `[ushort]` type; it is `[uint16]`.
+- A static C# method cannot be named `Move` or `Wheel`: the call fails with
+  "does not contain a method named…". Worked around with `MoveTo`/`ScrollWheel`.
+- `SendKeys` cannot type Cyrillic at all. Only `SendInput` +
+  `KEYEVENTF_UNICODE` works.
+- `ConvertTo-Json -Depth` for a UI tree must be **larger than 12**: a node is
+  about two levels of nesting, so a shallow depth silently substitutes a string
+  holding a .NET type name.
+- UIA can report infinite bounds — check `IsInfinity` and `NaN` before
+  casting to `Int32`.
+- COM objects (`AutomationElement`) must not be cached: they go stale as the
+  tree is repainted. Only identifiers are cached, with a fresh lookup before
+  every action.
+- `Add-Type` compiles as C# 5, so no `$"..."` string interpolation.
+- Interpolating a name before a colon turns `"$Owner`:$Token"` into `$Owner:`,
+  which PowerShell reads as a scoped variable. Write `${Owner}`.
 
-Подробности и история правок: [CHANGELOG.md](CHANGELOG.md).
-Атрибуция идей и лицензии зависимостей: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-Перед правкой прочитай [CONTRIBUTING.md](CONTRIBUTING.md) — там есть грабли,
-которые не видно по коду.
+Change history: [CHANGELOG.md](CHANGELOG.md).
+Attribution of ideas and dependency licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before editing — it lists traps that the
+code alone does not reveal.
 
-## Лицензия
+## License
 
-MIT. Публичные API Windows используются по документации Microsoft.
+MIT. Windows public APIs are used per Microsoft's documentation.
