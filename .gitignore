@@ -29,3 +29,9 @@ err*.txt
 keydiag*.png
 *.bak2
 *.bak-before-comment-strip
+
+
+o*.txt
+bench*.png
+printwindow.png
+*.log
