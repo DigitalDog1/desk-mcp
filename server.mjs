@@ -133,8 +133,25 @@ class Worker {
     process.stderr.write(`[worker] перезапуск #${this.restarts} через ${delay} мс\n`);
     await new Promise((r) => setTimeout(r, delay));
     this.start();
-    await this.readyPromise;
+    try {
+      await this.readyPromise;
+    } catch (e) {
+      // Воркер не ответил ready за 25 с. Если процесс при этом жив, он
+      // становится зомби: alive === true, в stdin пишется, ответа нет, и
+      // каждый следующий вызов висит до своего таймаута. Убиваем сразу —
+      // ensure() поднимет новый при следующем обращении.
+      this.kill();
+      throw e;
+    }
     this.startedAt = Date.now();
+  }
+
+  kill() {
+    if (!this.proc) return;
+    try {
+      this.proc.kill();
+    } catch { /* уже мёртв */ }
+    this.proc = null;
   }
 
   async call(tool, args, timeoutMs = CALL_TIMEOUT_MS) {
@@ -148,7 +165,14 @@ class Worker {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Инструмент '${tool}' не ответил за ${timeoutMs / 1000} с`));
+        // Инструмент не ответил — почти всегда это зависший UIA-RPC
+        // (типично: приложение 1С или старое WPF). Процесс при этом жив и
+        // больше не вернётся, поэтому либо он мёртв для нас, либо через
+        // паузу разрешит. Убиваем: ensure() поднимет новый на следующем
+        // вызове, иначе канал мёртв до ручного рестарта.
+        process.stderr.write(`[worker] '${tool}' не ответил за ${timeoutMs / 1000} с — воркер перезапускается\n`);
+        this.kill();
+        reject(new Error(`Инструмент '${tool}' не ответил за ${timeoutMs / 1000} с; воркер перезапущен, повтори вызов`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       proc.stdin.write(payload + "\n", (err) => {
@@ -170,9 +194,7 @@ class Worker {
 const worker = new Worker();
 worker.start();
 
-function text(s) {
-  return { content: [{ type: "text", text: String(s) }] };
-}
+
 function fail(e) {
   return {
     isError: true,
@@ -894,7 +916,7 @@ server.registerTool(
     }
     if (!exe) throw new Error(`Не найден ни Chrome, ни Edge. Проверено: ${tried.join(" | ")}`);
 
-    const profile = join(tmpdir(), "desk-mcp-cdp-profile");
+    const profile = path.join(tmpdir(), "desk-mcp-cdp-profile");
     mkdirSync(profile, { recursive: true });
     const args = [
       `--remote-debugging-port=${cdp.port}`,

@@ -460,8 +460,9 @@ public static class MsTree {
         Accessibility.IAccessible acc = FromWindow(hwnd);
         if (acc == null) return outList;
         int counter = 0;
-        return Build(acc, 0, depth, 8, false, ref counter) == null
-            ? outList : new List<MsNode>();
+        MsNode root = Build(acc, 0, depth, 8, false, ref counter);
+        if (root != null) outList.Add(root);
+        return outList;
     }
 }
 "@ -ReferencedAssemblies Accessibility
@@ -716,6 +717,17 @@ function Get-UiCached([string]$key, [scriptblock]$make) {
     $script:UiCache[$key] = @{ at = $now; data = $d }
     if ($script:UiCache.Count -gt 64) { $script:UiCache.Clear() }
     return , $d
+}
+
+function Get-ElementInfosCached {
+    param([string]$Title, [string]$Name, [string]$Type, [string]$Id, [int]$MaxDepth, [int]$Limit)
+    $key = "ei|$Title|$Name|$Type|$Id|$MaxDepth|$Limit"
+    return Get-UiCached $key {
+        $hits = Search-UiElements $Title $Name $Type $Id $MaxDepth $Limit
+        $items = @()
+        foreach ($h in $hits) { $items += ,(Convert-ElementInfo $h) }
+        , $items
+    }
 }
 
 function Get-UiNodes($el, [int]$depth, [int]$maxDepth, [ref]$counter, [int]$maxElements, [bool]$interactiveOnly) {
@@ -1113,7 +1125,7 @@ function Invoke-Tool {
                         $out += [ordered]@{ index = $i; tool = $tool; ok = $true; data = $res }
                         if ($s.stopOnError -eq $false) { continue }
                     } catch {
-                        $out += [ordered]@{ index = $i; tool = $tool; ok = $false; error = $_.Exception.Message }
+                        $out += [ordered]@{ index = $i; tool = $stepTool; ok = $false; error = $_.Exception.Message }
                         $stoppedAt = $i
                         break
                     }
@@ -1461,13 +1473,14 @@ function Invoke-Tool {
                 Start-Sleep -Milliseconds 150
                 [DeskMcp]::Click('left', 1)
                 Start-Sleep -Milliseconds 80
-                [DeskMcp]::VKey([uint16]0x11, $false)   # VK_CONTROL
+                $ctrlWasDown = [DeskMcp]::KeyDown(0x11)
+                [DeskMcp]::VKey([uint16]0x11, $false)
                 Start-Sleep -Milliseconds 20
-                [DeskMcp]::VKey([uint16]0x41, $false)   # VK_A
+                [DeskMcp]::VKey([uint16]0x41, $false)
                 Start-Sleep -Milliseconds 20
                 [DeskMcp]::VKey([uint16]0x41, $true)
                 Start-Sleep -Milliseconds 20
-                [DeskMcp]::VKey([uint16]0x11, $true)
+                if (-not $ctrlWasDown) { [DeskMcp]::VKey([uint16]0x11, $true) }
                 $result = [ordered]@{ ok = $true; note = 'Выделено всё содержимое поля (Ctrl+A)'; element = $info }
             }
 
@@ -1486,11 +1499,15 @@ function Invoke-Tool {
                         } else {
                             $role = if ($chk.selector) { $chk.selector.role } else { $null }
                             $lab  = if ($chk.selector) { $chk.selector.label_contains } else { $null }
-                            $hits = Search-UiElements ([string]$a.title) ([string]$lab) ([string]$role) '' 8 5
-                            $n = @($hits).Count
+                            # Кэшируем именно сведения (без COM-объектов): verify
+                            # в агентном цикле вызывается после find и не
+                            # требует живого элемента, а обход дерева стоит
+                            # сотни миллисекунд каждый раз.
+                            $infos = Get-ElementInfosCached ([string]$a.title) ([string]$lab) ([string]$role) '' 8 5
+                            $n = @($infos).Count
                             if ($n -eq 0) { $state = 'unsatisfied'; $detail = 'не найден' }
                             else {
-                                $info = Convert-ElementInfo @($hits)[0]
+                                $info = @($infos)[0]
                                 $detail = "найдено $n"
                                 if ((Has-Prop $chk 'value_equals')) {
                                     $v = $info['value']
