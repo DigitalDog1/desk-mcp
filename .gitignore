@@ -27,3 +27,5 @@ undone.png
 out*.txt
 err*.txt
 keydiag*.png
+*.bak2
+*.bak-before-comment-strip

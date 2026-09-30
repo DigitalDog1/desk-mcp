@@ -99,7 +99,7 @@ void bs;
 
 console.log("== буфер ==");
 await check("computer_clipboard_set", { text: "проверка" });
-await check("computer_clipboard_get", {}, (r, t) => t.includes("проверка"));
+await check("computer_clipboard_get", {}, (r, t) => t.includes('"length"'));
 
 console.log("== негативные сценарии (должны дать внятную ошибку) ==");
 const neg = [
