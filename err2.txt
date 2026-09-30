@@ -1,2 +1,0 @@
-  [desk-mcp] воркер готов: pid 5072, PowerShell 5.1.19041.2364
-  [desk-mcp] MCP-сервер слушает stdio

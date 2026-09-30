@@ -23,3 +23,7 @@ t-*.json
 window.png
 typed.png
 undone.png
+
+out*.txt
+err*.txt
+keydiag*.png
