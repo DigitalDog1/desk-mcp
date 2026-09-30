@@ -29,6 +29,7 @@ public class DeskMcp {
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
     [DllImport("user32.dll")] public static extern IntPtr GetDesktopWindow();
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int ht, bool repaint);
+    [DllImport("user32.dll")] public static extern short GetKeyState(int vKey);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
@@ -157,9 +158,11 @@ public class DeskMcp {
 
     public static int PidOf(IntPtr h) {
         int pid = 0;
-        GetWindowThreadProcessIdPid(h, out pid);
+        if (GetWindowThreadProcessIdPid(h, out pid) == 0) return 0;
         return pid;
     }
+
+    public static bool KeyDown(int vk) { return (GetKeyState(vk) & 0x8000) != 0; }
 
     public static bool Focus(IntPtr h) {
         if (h == IntPtr.Zero) return false;
@@ -170,12 +173,18 @@ public class DeskMcp {
         if (fgThread != myThread && fgThread != 0) {
             attached = AttachThreadInput(myThread, fgThread, true);
         }
-        ShowWindow(h, 9);            // SW_RESTORE
-        BringWindowToTop(h);
-        bool ok = SetForegroundWindow(h);
-        SetActiveWindow(h);
-        if (attached) AttachThreadInput(myThread, fgThread, false);
-        return ok;
+        // try/finally обязателен: без него исключение между Attach и Detach
+        // оставит потоки ввода сцепленными, и последующие клики будут уходить
+        // не туда — вплоть до залипания модификаторов.
+        try {
+            ShowWindow(h, 9);
+            BringWindowToTop(h);
+            bool ok = SetForegroundWindow(h);
+            SetActiveWindow(h);
+            return ok;
+        } finally {
+            if (attached) AttachThreadInput(myThread, fgThread, false);
+        }
     }
 }
 '@ -ReferencedAssemblies System.Drawing
@@ -691,6 +700,24 @@ function Invoke-ScreenOcr {
     }
 }
 
+$script:UiCache = @{}
+
+# Обход дерева UIA стоит сотни миллисекунд, а агентный цикл обычно делает
+# find → invoke → verify на одном и том же окне. Короткий кэш (1.2 с) убирает
+# повторный обход, но недостаточно мал, чтобы отдать протухшие данные после
+# перерисовки интерфейса.
+function Get-UiCached([string]$key, [scriptblock]$make) {
+    $now = [Environment]::TickCount64
+    if ($script:UiCache.ContainsKey($key)) {
+        $e = $script:UiCache[$key]
+        if (($now - $e.at) -lt 1200) { return $e.data }
+    }
+    $d = & $make
+    $script:UiCache[$key] = @{ at = $now; data = $d }
+    if ($script:UiCache.Count -gt 64) { $script:UiCache.Clear() }
+    return , $d
+}
+
 function Get-UiNodes($el, [int]$depth, [int]$maxDepth, [ref]$counter, [int]$maxElements, [bool]$interactiveOnly) {
     if ($depth -gt $maxDepth) { return @() }
     if ($counter.Value -ge $maxElements) { return @() }
@@ -750,6 +777,14 @@ function Get-UiNodes($el, [int]$depth, [int]$maxDepth, [ref]$counter, [int]$maxE
         try {
             $sp = $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
             $node['selected'] = [bool]$sp.Current.IsSelected
+        } catch { }
+    }
+    if ($node['patterns'] -and ($node['patterns'] -contains 'TextPattern')) {
+        try {
+            $tp = $el.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+            $doc = $tp.DocumentRange
+            $node['text'] = Trunc $doc.GetText(-1) 300
+            $node['textLen'] = $doc.Length
         } catch { }
     }
     if ($children.Count -gt 0) { $node['children'] = $children }
@@ -822,6 +857,13 @@ function Convert-ElementInfo($pair) {
     }
     if ($pats -contains 'SelectionItemPattern') {
         try { $info['selected'] = [bool]$el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected } catch { }
+    }
+    if ($pats -contains 'TextPattern') {
+        try {
+            $doc = $el.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern).DocumentRange
+            $info['text'] = Trunc $doc.GetText(-1) 300
+            $info['textLen'] = $doc.Length
+        } catch { }
     }
     return , $info
 }
@@ -1113,11 +1155,17 @@ function Invoke-Tool {
                 }
                 if ($a.hoverFirst) { [DeskMcp]::MoveTo([int]$a.x, [int]$a.y); Start-Sleep -Milliseconds 250 }
                 elseif ($mods.Count -gt 0) { [DeskMcp]::MoveTo([int]$a.x, [int]$a.y); Start-Sleep -Milliseconds 60 }
-                foreach ($m in $mods) { [DeskMcp]::VKey([uint16]$m, $false) }
+                $wasDown = @()
+                foreach ($m in $mods) {
+                    $wasDown += [DeskMcp]::KeyDown([uint16]$m)
+                    [DeskMcp]::VKey([uint16]$m, $false)
+                }
                 Start-Sleep -Milliseconds 30
                 [DeskMcp]::Click($(if ($a.button) { $a.button } else { 'left' }), $(if ($a.count) { [int]$a.count } else { 1 }))
                 Start-Sleep -Milliseconds 30
-                for ($i = $mods.Count - 1; $i -ge 0; $i--) { [DeskMcp]::VKey([uint16]$mods[$i], $true) }
+                for ($i = $mods.Count - 1; $i -ge 0; $i--) {
+                    if (-not $wasDown[$i]) { [DeskMcp]::VKey([uint16]$mods[$i], $true) }
+                }
                 $result = [ordered]@{
                     ok = $true; x = [int]$a.x; y = [int]$a.y
                     button = $(if ($a.button) { $a.button } else { 'left' })
@@ -1199,12 +1247,18 @@ function Invoke-Tool {
                 $vk = Get-Vk $main
                 if ($null -eq $vk) { throw "Неизвестная клавиша: '$main'" }
                 $sent = 0
-                foreach ($m in $mods) { $sent += [DeskMcp]::VKey([uint16]$m, $false) }
+                $wasDown = @()
+                foreach ($m in $mods) {
+                    $wasDown += [DeskMcp]::KeyDown([uint16]$m)
+                    $sent += [DeskMcp]::VKey([uint16]$m, $false)
+                }
                 Start-Sleep -Milliseconds 30
                 $sent += [DeskMcp]::VKey([uint16]$vk, $false)
                 Start-Sleep -Milliseconds 30
                 $sent += [DeskMcp]::VKey([uint16]$vk, $true)
-                for ($i = $mods.Count - 1; $i -ge 0; $i--) { $sent += [DeskMcp]::VKey([uint16]$mods[$i], $true) }
+                for ($i = $mods.Count - 1; $i -ge 0; $i--) {
+                    if (-not $wasDown[$i]) { $sent += [DeskMcp]::VKey([uint16]$mods[$i], $true) }
+                }
                 if ($sent -ne (($mods.Count + 1) * 2)) {
                     throw "SendInput принял $sent событий из $(($mods.Count + 1) * 2) — ввод не дошёл"
                 }
@@ -1234,14 +1288,23 @@ function Invoke-Tool {
             }
 
             'close_window' {
+                # Разрушительное действие: закрывает чужое окно, а с force ещё и
+                # убивает процесс с несохранёнными данными. Требуем явного
+                # подтверждения — ровно как needsApproval у OpenAI.
+                if (-not $a.confirm) {
+                    throw "Закрытие окна требует подтверждения: повтори с confirm: true (окно '*$($a.title)*'$(if ($a.force) { ', force: ' + $a.force }))"
+                }
                 $w = Find-WindowByTitle ([string]$a.title) 3
                 if (-not $w) { throw "Окно '*$($a.title)*' не найдено" }
                 $p = Get-Process -Id $w.process -ErrorAction SilentlyContinue
                 if ($a.force) { $p.Kill() } else { $p.CloseMainWindow() | Out-Null }
-                $result = [ordered]@{ ok = $true; title = $w.title }
+                $result = [ordered]@{ ok = $true; title = $w.title; forced = [bool]$a.force }
             }
 
             'launch' {
+                if (-not $a.confirm) {
+                    throw "Запуск программы требует подтверждения: повтори с confirm: true (путь '$($a.path)')"
+                }
                 if (-not $a.path) { throw "Не указан путь к программе" }
                 $sp = @{
                     FilePath  = $a.path
@@ -1339,13 +1402,16 @@ function Invoke-Tool {
             }
 
             'find' {
-                $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
-                                       ([string]$a.id) $(if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }) `
-                                       $(if ($a.limit) { [int]$a.limit } else { 20 })
-                if (@($hits).Count -eq 0) { throw "Не найдено ни одного элемента по заданным условиям" }
-                $items = @()
-                foreach ($h in $hits) { $items += ,(Convert-ElementInfo $h) }
-                $result = [ordered]@{ count = $items.Count; elements = $items }
+                $key = "find|$([string]$a.title)|$([string]$a.name)|$([string]$a.type)|$([string]$a.id)|$([string]$a.maxDepth)|$([string]$a.limit)"
+                $result = Get-UiCached $key {
+                    $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
+                                           ([string]$a.id) $(if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }) `
+                                           $(if ($a.limit) { [int]$a.limit } else { 20 })
+                    if (@($hits).Count -eq 0) { throw "Не найдено ни одного элемента по заданным условиям" }
+                    $items = @()
+                    foreach ($h in $hits) { $items += ,(Convert-ElementInfo $h) }
+                    [ordered]@{ count = $items.Count; elements = $items }
+                }
             }
 
             'invoke' {

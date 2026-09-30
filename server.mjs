@@ -32,6 +32,7 @@ class Worker {
     this.nextId = 1;
     this.readyPromise = null;
     this.restarts = 0;
+    this.startedAt = Date.now();
   }
 
   get alive() {
@@ -110,17 +111,30 @@ class Worker {
    * Воркер — единая точка отказа. Один зависший UIA-RPC в зависшее окно
    * (классика UI Automation) убивает процесс, и без перезапуска канал мёртв
    * до рестарта клиента, при том что MCP-сервер продолжает рекламировать все
-   * 19 тулов как рабочие.
+   * тулы как рабочие.
+   *
+   * Перезапуски с экспоненциальной паузой: без неё воркер, который падает
+   * каждый раз (например, UIA заблокирован), перезапускается в цикле и
+   * ест CPU. Счётчик сбрасывается, если воркер успешно проработал 30 с.
    */
   async ensure() {
-    if (this.alive) return;
+    if (this.alive) {
+      if (this.restarts > 0 && Date.now() - this.startedAt > 30_000) {
+        process.stderr.write(`[worker] стабилен, счётчик рестартов сброшен\n`);
+        this.restarts = 0;
+      }
+      return;
+    }
     if (this.restarts > 5) {
       throw new Error(`Воркер падает ${this.restarts} раз подряд — канал не восстановить`);
     }
     this.restarts++;
-    process.stderr.write(`[worker] перезапуск #${this.restarts}\n`);
+    const delay = Math.min(500 * 2 ** (this.restarts - 1), 8000);
+    process.stderr.write(`[worker] перезапуск #${this.restarts} через ${delay} мс\n`);
+    await new Promise((r) => setTimeout(r, delay));
     this.start();
     await this.readyPromise;
+    this.startedAt = Date.now();
   }
 
   async call(tool, args, timeoutMs = CALL_TIMEOUT_MS) {
@@ -331,14 +345,15 @@ server.registerTool(
 
 server.registerTool(
   "computer_close_window",
-  { title: "Закрыть окно", description: "Закрывает окно по подстроке заголовка. force — убить процесс.", inputSchema: { title: z.string(), force: z.boolean().optional().default(false) } },
+  { title: "Закрыть окно", description: "Закрывает окно по подстроке заголовка. force — убить процесс. Требует confirm: true: действие разрушительное, а с force ещё и теряет несохранённые данные.", inputSchema: { title: z.string(), force: z.boolean().optional().default(false), confirm: z.boolean().optional() } },
   R(async (a) => ok(await worker.call("close_window", a))),
 );
 
 server.registerTool(
   "computer_launch",
-  { title: "Запустить программу", description: "Запускает исполняемый файл. Путь до .exe обязателен.", inputSchema: {
+  { title: "Запустить программу", description: "Запускает исполняемый файл. Путь до .exe обязателен. Требует confirm: true.", inputSchema: {
     path: z.string(), args: z.array(z.string()).optional(), hidden: z.boolean().optional().default(false),
+    confirm: z.boolean().optional(),
   } },
   R(async (a) => ok(await worker.call("launch", a))),
 );
