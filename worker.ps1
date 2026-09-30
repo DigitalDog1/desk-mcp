@@ -846,6 +846,42 @@ function Search-UiElements {
     return , $hits
 }
 
+# Кэшировать COM-объекты AutomationElement нельзя: протухшая ссылка даст
+# исключение при Invoke()/GetCurrentPattern() там, где раньше был успех.
+# Поэтому кэшируются только НЕИЗМЕНЯЕМЫЕ идентификаторы (automationId, имя,
+# роль, прямоугольник), а перед действием делается свежий поиск по этим ключам
+# с проверкой, что найденный элемент всё ещё им соответствует.
+# Схема предложена ревьюером и безопаснее, чем кэш объектов.
+function Resolve-Target($a) {
+    $title = [string]$a.title
+    $name = [string]$a.name
+    $type = [string]$a.type
+    $id = [string]$a.id
+    $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
+    $el = $a.element
+    if ($el) {
+        if (-not $name -and $el['name']) { $name = [string]$el['name'] }
+        if (-not $type -and $el['type']) { $type = [string]$el['type'] }
+        if (-not $id   -and $el['id'])   { $id   = [string]$el['id'] }
+    }
+    $hits = Search-UiElements $title $name $type $id $depth 1
+    if (@($hits).Count -eq 0 -and $el -and $el['rect']) {
+        # Имя могло смениться (счётчик, «2 элемента выбрано»). Пробуем по роли
+        # и по координате внутри кэшированного прямоугольника.
+        $hits = Search-UiElements $title '' $type '' $depth 200
+        $cx = [int]$el['rect']['x'] + [int]([int]$el['rect']['w'] / 2)
+        $cy = [int]$el['rect']['y'] + [int]([int]$el['rect']['h'] / 2)
+        $filtered = @()
+        foreach ($h in $hits) {
+            $r = (Convert-ElementInfo $h)['rect']
+            if ([int]$r['x'] -le $cx -and $cx -le ([int]$r['x'] + [int]$r['w']) -and
+                [int]$r['y'] -le $cy -and $cy -le ([int]$r['y'] + [int]$r['h'])) { $filtered += ,$h }
+        }
+        $hits = $filtered
+    }
+    return , $hits
+}
+
 function Convert-ElementInfo($pair) {
     $el = $pair[0]; $ct = $pair[1]
     $c = $el.Current
@@ -1427,8 +1463,7 @@ function Invoke-Tool {
             }
 
             'invoke' {
-                $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
-                                       ([string]$a.id) $(if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }) 1
+                $hits = Resolve-Target $a
                 if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден — нажимать нечего" }
                 $pair = @($hits)[0]
                 $el = $pair[0]
@@ -1450,8 +1485,7 @@ function Invoke-Tool {
             }
 
             'set_value' {
-                $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
-                                       ([string]$a.id) $(if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }) 1
+                $hits = Resolve-Target $a
                 if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден" }
                 $el = @($hits)[0][0]
                 try {

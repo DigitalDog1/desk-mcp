@@ -526,6 +526,8 @@ server.registerTool(
       name: z.string().optional().describe("подстрока имени элемента"),
       type: z.string().optional().describe("ControlType: Button, Edit, CheckBox, Hyperlink..."),
       id: z.string().optional().describe("точный AutomationId"),
+      element: z.object({ name: z.string().optional(), type: z.string().optional(), id: z.string().optional(), rect: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional() }).optional()
+        .describe("дескриптор из computer_find — элемент переищется по ключам, COM-объект не кэшируется"),
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
       limit: z.number().int().min(1).max(50).optional().default(20),
     },
