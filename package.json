@@ -1,0 +1,14 @@
+{
+  "name": "desk-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP-сервер управления рабочим столом Windows (WinAPI + UI Automation + MSAA)",
+  "bin": { "desk-mcp": "server.mjs" },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "zod": "^3.25.0"
+  },
+  "scripts": { "start": "node server.mjs", "test": "node smoke.mjs" }
+}

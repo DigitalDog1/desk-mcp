@@ -1,0 +1,26 @@
+
+--- focus: {
+  "ok": true,
+  "title": "desk.ps1 – Блокнот",
+  "process": 21352
+}
+
+--- type: {
+  "ok": true,
+  "chars": 16,
+  "events": 32
+}
+
+снимок ввода сохранён: typed.png (Снимок 900x200 (image/png, 13 КБ) в области 283,1000 900x200)
+отменено 4x ctrl+z
+снимок после отмены: undone.png
+
+--- clipboard_set: {
+  "ok": true,
+  "length": 15
+}
+
+--- clipboard_get: {
+  "text": "проверка буфера",
+  "length": 15
+}
