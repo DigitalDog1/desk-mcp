@@ -30,6 +30,34 @@ public class DeskMcp {
     [DllImport("user32.dll")] public static extern IntPtr GetDesktopWindow();
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int ht, bool repaint);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left, Top, Right, Bottom; }
+    // PrintWindow с PW_RENDERFULLCONTENT (0x2) заставляет приложение
+    // перерисовать содержимое в переданный DC. Обычный BitBlt к окну
+    // возвращает то, что лежит в композиторе, а для перекрытых и
+    // развёрнутых окон — пустоту.
+    public static System.Drawing.Bitmap CaptureWindow(IntPtr h) {
+        RECT r;
+        if (h == IntPtr.Zero || !GetWindowRect(h, out r)) return null;
+        int w = r.Right - r.Left, ht = r.Bottom - r.Top;
+        if (w <= 0 || ht <= 0) return null;
+        var bmp = new System.Drawing.Bitmap(w, ht, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = System.Drawing.Graphics.FromImage(bmp)) {
+            IntPtr hdc = g.GetHdc();
+            try { PrintWindow(h, hdc, 2); }
+            finally { g.ReleaseHdc(hdc); }
+        }
+        return bmp;
+    }
+
+    public static System.Drawing.Rectangle WindowBounds(IntPtr h) {
+        RECT r;
+        if (!GetWindowRect(h, out r)) return new System.Drawing.Rectangle(0, 0, 0, 0);
+        return new System.Drawing.Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int X; public int Y; }
@@ -150,14 +178,129 @@ public class DeskMcp {
         return ok;
     }
 }
-'@
+'@ -ReferencedAssemblies System.Drawing
 }
 
+if (-not ("DeskMcp" -as [type])) { throw "Класс DeskMcp не скомпилировался — воркер не может работать" }
+
+
+if (-not ("VDesk" -as [type])) {
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+[ComImport, Guid("2E910C3F-9F48-4B2F-BB99-4B87A8A89A7D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IVirtualDesktopManager {
+    [PreserveSig] int IsWindowOnDesktop(IntPtr hwnd, [In] ref Guid id);
+    [PreserveSig] int MoveWindowToDesktop(IntPtr hwnd, [In] ref Guid id);
+    [PreserveSig] IntPtr FindWindowByProcessId(uint pid, [MarshalAs(UnmanagedType.LPWStr)] string caption);
+    [PreserveSig] Guid GetWindowDesktopId(IntPtr hwnd);
+    [PreserveSig] int SetWindowDesktopId(IntPtr hwnd, [In] ref Guid id);
+    [PreserveSig] uint GetDesktopCount();
+    [PreserveSig] Guid GetDesktopByIndex(uint index);
+    [PreserveSig] Guid CreateDesktop();
+    [PreserveSig] int CloseDesktop([In] ref Guid id);
+    [PreserveSig] int SwitchDesktop([In] ref Guid id);
+}
+
+public static class VDesk {
+    static readonly Guid CLSID = new Guid("A5CD92FF-29BE-454C-8D04-D8285FB3F1B5");
+    static readonly Guid IID = new Guid("2E910C3F-9F48-4B2F-BB99-4B87A8A89A7D");
+    static bool _loaded = false;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr LoadLibraryW(string fileName);
+    [System.Runtime.InteropServices.DllImport("ole32.dll")]
+    static extern int CoCreateInstance(ref Guid clsid, IntPtr outer, uint context, ref Guid iid, [MarshalAs(UnmanagedType.IUnknown)] out object o);
+
+    public static IVirtualDesktopManager Get() {
+        // Класс живёт в VirtualDesktopManager.dll и не зарегистрирован в реестре:
+        // Type.GetTypeFromCLSID падает с REGDB_E_CLASSNOTREG, пока DLL не
+        // загружена. Под Windows 10/11 она лежит в System32.
+        if (!_loaded) {
+            IntPtr h = LoadLibraryW("VirtualDesktopManager.dll");
+            if (h == IntPtr.Zero) {
+                throw new COMException("VirtualDesktopManager.dll не найдена (WinErr " + Marshal.GetLastWin32Error() + ")");
+            }
+            _loaded = true;
+        }
+        Guid c = CLSID, i = IID;
+        object o;
+        int hr = CoCreateInstance(ref c, IntPtr.Zero, 1, ref i, out o);
+        if (hr != 0) throw new COMException("CoCreateInstance вернул 0x" + hr.ToString("X8"));
+        return (IVirtualDesktopManager)o;
+    }
+
+    public static List<string> List() {
+        var m = Get();
+        var res = new List<string>();
+        uint n = m.GetDesktopCount();
+        for (uint i = 0; i < n; i++) res.Add(m.GetDesktopByIndex(i).ToString());
+        return res;
+    }
+
+    public static string Create() { return Get().CreateDesktop().ToString(); }
+
+    public static void Switch(string guid) {
+        Guid g = new Guid(guid);
+        int hr = Get().SwitchDesktop(ref g);
+        if (hr != 0) throw new COMException("SwitchDesktop вернул HRESULT 0x" + hr.ToString("X8"));
+    }
+
+    public static void Close(string guid) {
+        Guid g = new Guid(guid);
+        int hr = Get().CloseDesktop(ref g);
+        if (hr != 0) throw new COMException("CloseDesktop вернул HRESULT 0x" + hr.ToString("X8"));
+    }
+
+    public static string OfWindow(IntPtr hwnd) { return Get().GetWindowDesktopId(hwnd).ToString(); }
+
+    public static void MoveWindowTo(IntPtr hwnd, string guid) {
+        Guid g = new Guid(guid);
+        int hr = Get().MoveWindowToDesktop(hwnd, ref g);
+        if (hr != 0) throw new COMException("MoveWindowToDesktop вернул HRESULT 0x" + hr.ToString("X8"));
+    }
+}
+"@
+}
+
+$script:BenchProc = $null
+
+function Get-BenchLog { Join-Path $env:TEMP 'desk-mcp-bench.log' }
+
+function Start-Bench {
+    $script:BenchProc = Start-Process -FilePath 'powershell.exe' `
+        -ArgumentList '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-STA', '-File', "`"$PSScriptRoot\bench.ps1`"" `
+        -PassThru -WindowStyle Hidden
+    return $script:BenchProc.Id
+}
+
+function Read-BenchLog {
+    $f = Get-BenchLog
+    if (-not (Test-Path $f)) { return '' }
+    return [System.IO.File]::ReadAllText($f, [System.Text.Encoding]::UTF8)
+}
+
+function Stop-Bench {
+    if ($script:BenchProc -and -not $script:BenchProc.HasExited) { $script:BenchProc.Kill() }
+    $script:BenchProc = $null
+}
+function Get-DeskInfo {
+    $ids = [VDesk]::List()
+    $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    return [ordered]@{
+        count = $ids.Count
+        desktops = @($ids | ForEach-Object { [ordered]@{ id = $_ } })
+        screen = [ordered]@{ x = $vs.Left; y = $vs.Top; w = $vs.Width; h = $vs.Height }
+    }
+}
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName WindowsBase
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
 
 if (-not ("MsTree" -as [type])) {
 Add-Type -TypeDefinition @"
@@ -366,7 +509,20 @@ function Send-Response($id, $ok, $data, $error) {
 }
 
 function Rect($r) {
-    return [ordered]@{ x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height }
+    $out = [ordered]@{ x = 0; y = 0; w = 0; h = 0 }
+    if ($null -eq $r) { return $out }
+    foreach ($k in 'X', 'Y', 'Width', 'Height') {
+        $v = 0
+        try {
+            $raw = $r.$k
+            $d = [double]$raw
+            if ([double]::IsInfinity($d) -or [double]::IsNaN($d)) { $d = 0 }
+            if ([Math]::Abs($d) -gt 200000000) { $d = 0 }
+            $v = [int][Math]::Round($d)
+        } catch { $v = 0 }
+        $out[[string]$k.Substring(0,1).ToLower()] = $v
+    }
+    return $out
 }
 
 function Escape-Like([string]$s) {
@@ -469,6 +625,71 @@ $script:InteractiveTypes = @(
     'RadioButton','Tab','TabItem','Tree','TreeItem','DataItem','Document',
     'Slider','Spinner','ProgressBar','SplitButton','Menu','MenuBar','ToolBar'
 )
+
+function Invoke-ScreenOcr {
+    param([string]$Path, [string]$Lang)
+    $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+        $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+    })[0]
+    function Await($op, $t) {
+        $x = $asTaskGeneric.MakeGenericMethod($t).Invoke($null, @($op))
+        if (-not $x.Wait(25000)) { throw "WinRT-вызов не завершился за 25 с" }
+        return $x.Result
+    }
+    $T = @{
+        StorageFile  = [Windows.Storage.StorageFile, Windows, ContentType = WindowsRuntime]
+        FileAccess   = [Windows.Storage.FileAccessMode, Windows, ContentType = WindowsRuntime]
+        Decoder      = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime]
+        SoftBitmap   = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Foundation, ContentType = WindowsRuntime]
+        OcrEngine    = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
+        OcrResult    = [Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType = WindowsRuntime]
+        Language     = [Windows.Globalization.Language, Windows.Foundation, ContentType = WindowsRuntime]
+        RandomStream = [Windows.Storage.Streams.IRandomAccessStream, Windows.Foundation, ContentType = WindowsRuntime]
+    }
+    $sf  = Await ($T.StorageFile::GetFileFromPathAsync($Path)) $T.StorageFile
+    $ras = Await ($sf.OpenAsync($T.FileAccess::Read)) $T.RandomStream
+    $dec = Await ($T.Decoder::CreateAsync($ras)) $T.Decoder
+    $sb  = Await ($dec.GetSoftwareBitmapAsync()) $T.SoftBitmap
+    $eng = $null
+    if ($Lang) { $eng = $T.OcrEngine::TryCreateFromLanguage($T.Language::new($Lang)) }
+    if (-not $eng) { $eng = $T.OcrEngine::TryCreateFromUserProfileLanguages() }
+    if (-not $eng) { throw "Не удалось создать OCR-движок: нет ни языка $Lang, ни языков профиля" }
+    $res = Await ($eng.RecognizeAsync($sb)) $T.OcrResult
+    $lines = @()
+    # WinRT-коллекции (IReadOnlyList) приводим к массиву явно: PowerShell
+    # разворачивает их при обращении к .Count, и количество получается
+    # перечислением значений вместо числа.
+    foreach ($l in @($res.Lines)) {
+        $wordArr = @($l.Words)
+        if ($wordArr.Count -eq 0) { continue }
+        $words = @()
+        foreach ($w in $wordArr) {
+            $b = $w.BoundingRect
+            $words += [ordered]@{
+                text = $w.Text
+                rect = [ordered]@{ x = [int]$b.X; y = [int]$b.Y; w = [int]$b.Width; h = [int]$b.Height }
+            }
+        }
+        $b0 = $wordArr[0].BoundingRect
+        $bN = $wordArr[$wordArr.Count - 1].BoundingRect
+        $lines += [ordered]@{
+            text = $l.Text
+            rect = [ordered]@{
+                x = [int]$b0.X
+                y = [int]$b0.Y
+                w = [int](($bN.X + $bN.Width) - $b0.X)
+                h = [int](($bN.Y + $bN.Height) - $b0.Y)
+            }
+            words = $words
+        }
+    }
+    return [ordered]@{
+        text = $res.Text
+        lineCount = $lines.Count
+        lines = $lines
+        image = [ordered]@{ x = 0; y = 0; w = $sb.PixelWidth; h = $sb.PixelHeight }
+    }
+}
 
 function Get-UiNodes($el, [int]$depth, [int]$maxDepth, [ref]$counter, [int]$maxElements, [bool]$interactiveOnly) {
     if ($depth -gt $maxDepth) { return @() }
@@ -676,7 +897,7 @@ function Get-ElementAt([int]$x, [int]$y) {
 
 
 function Save-Screenshot {
-    param([string]$Region, [int]$Display, [double]$Scale, [string]$Format, [int]$Quality)
+    param([string]$Region, [int]$Display, [double]$Scale, [string]$Format, [int]$Quality, [string]$WindowTitle)
     $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
     $x = $vs.Left; $y = $vs.Top; $w = $vs.Width; $h = $vs.Height
     if ($Region) {
@@ -687,11 +908,24 @@ function Save-Screenshot {
     if ($w -le 0 -or $h -le 0) { throw "Пустой размер снимка: ${w}x${h}" }
 
     $bmp = $null; $g = $null; $g2 = $null; $out = $null; $ms = $null; $ep = $null
+    $via = 'screen'
     try {
-        $bmp = New-Object System.Drawing.Bitmap $w, $h
-        $g = [System.Drawing.Graphics]::FromImage($bmp)
-        $g.CopyFromScreen($x, $y, 0, 0, (New-Object System.Drawing.Size $w, $h))
-        $g.Dispose(); $g = $null
+        if ($WindowTitle) {
+            $win = Find-WindowByTitle $WindowTitle 3
+            if (-not $win) { throw "Окно '*$WindowTitle*' не найдено за 3 с" }
+            $proc = Get-Process -Id $win.process
+            $bmp = [DeskMcp]::CaptureWindow($proc.MainWindowHandle)
+            if ($null -eq $bmp) { throw "PrintWindow вернул пустой кадр для '$($win.title)'" }
+            $bounds = [DeskMcp]::WindowBounds($proc.MainWindowHandle)
+            $x = $bounds.X; $y = $bounds.Y
+            $w = $bmp.Width; $h = $bmp.Height
+            $via = 'printwindow'
+        } else {
+            $bmp = New-Object System.Drawing.Bitmap $w, $h
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($x, $y, 0, 0, (New-Object System.Drawing.Size $w, $h))
+            $g.Dispose(); $g = $null
+        }
 
         $tw = $w; $th = $h
         if ($Scale -gt 0 -and $w -gt 1 -and ($Scale -lt 1 -or $Scale -gt 1)) {
@@ -725,6 +959,7 @@ function Save-Screenshot {
             mime = $mime
             width = $tw
             height = $th
+            via = $via
             region = [ordered]@{ x = $x; y = $y; w = $w; h = $h }
             bytes = [Convert]::ToBase64String($bytes)
         }
@@ -770,28 +1005,83 @@ function Test-Permissions {
 }
 
 
-Send-Response 0 $true ([ordered]@{ ready = $true; pid = $PID; powershell = $PSVersionTable.PSVersion.ToString() }) $null
-
-while ($true) {
-    $line = [Console]::In.ReadLine()
-    if ($null -eq $line) { break }
-    if ($line.Trim() -eq '') { continue }
-
-    $id = 0
-    try {
-        $req = $line | ConvertFrom-Json
-        $id = $req.id
-        $tool = $req.tool
-        $a = $req.args
-        $result = $null
-
-        switch ($tool) {
-
+function Invoke-Tool {
+    param([string]$tool, $a)
+    $result = $null
+    switch ($tool) {
             'screenshot' {
                 $fmt = if ($a.format) { $a.format } else { 'png' }
                 $result = Save-Screenshot -Region $a.region -Display $a.display `
                                         -Scale $(if ($a.scale) { [double]$a.scale } else { 0 }) `
-                                        -Format $fmt -Quality $(if ($a.quality) { [int]$a.quality } else { 80 })
+                                        -Format $fmt -Quality $(if ($a.quality) { [int]$a.quality } else { 80 }) `
+                                        -WindowTitle ([string]$a.window)
+            }
+
+            'bench' {
+                $action = [string]$a.action
+                switch ($action) {
+                    'show'  { $result = [ordered]@{ ok = $true; pid = Start-Bench } }
+                    'read'  { $result = [ordered]@{ ok = $true; log = Read-BenchLog } }
+                    'close' { Stop-Bench; $result = [ordered]@{ ok = $true } }
+                    default { throw "Неизвестное действие bench: '$action' (show|read|close)" }
+                }
+            }
+
+            'desktop' {
+                $action = [string]$a.action
+                switch ($action) {
+                    'list' { $result = Get-DeskInfo }
+                    'create' {
+                        $id = [VDesk]::Create()
+                        if ($a.switchTo) { [VDesk]::Switch($id) }
+                        $result = [ordered]@{ ok = $true; id = $id; switched = [bool]$a.switchTo }
+                    }
+                    'switch' { [VDesk]::Switch([string]$a.id); $result = [ordered]@{ ok = $true; id = [string]$a.id } }
+                    'close' { [VDesk]::Close([string]$a.id); $result = [ordered]@{ ok = $true; id = [string]$a.id } }
+                    'of_window' {
+                        $w = Find-WindowByTitle ([string]$a.title) 3
+                        if (-not $w) { throw "Окно '*$($a.title)*' не найдено" }
+                        $proc = Get-Process -Id $w.process
+                        $result = [ordered]@{ title = $w.title; desktop = [VDesk]::OfWindow($proc.MainWindowHandle) }
+                    }
+                    'move_window' {
+                        $w = Find-WindowByTitle ([string]$a.title) 3
+                        if (-not $w) { throw "Окно '*$($a.title)*' не найдено" }
+                        $proc = Get-Process -Id $w.process
+                        [VDesk]::MoveWindowTo($proc.MainWindowHandle, [string]$a.id)
+                        $result = [ordered]@{ ok = $true; title = $w.title; desktop = [string]$a.id }
+                    }
+                    default { throw "Неизвестное действие desktop: '$action' (list|create|switch|close|of_window|move_window)" }
+                }
+            }
+
+            'batch' {
+                $steps = @($a.steps)
+                if ($steps.Count -eq 0) { throw "steps пуст" }
+                if ($steps.Count -gt 50) { throw "Слишком много шагов за раз: $($steps.Count), максимум 50" }
+                $out = @()
+                $stoppedAt = $null
+                for ($i = 0; $i -lt $steps.Count; $i++) {
+                    $s = $steps[$i]
+                    $tool = [string]$s.tool
+                    $stepArgs = $s.args
+                    if (-not $stepArgs) { $stepArgs = @{} }
+                    try {
+                        $res = Invoke-Tool $tool $stepArgs
+                        $out += [ordered]@{ index = $i; tool = $tool; ok = $true; data = $res }
+                        if ($s.stopOnError -eq $false) { continue }
+                    } catch {
+                        $out += [ordered]@{ index = $i; tool = $tool; ok = $false; error = $_.Exception.Message }
+                        $stoppedAt = $i
+                        break
+                    }
+                }
+                $result = [ordered]@{
+                    executed = $out.Count
+                    stoppedAt = $stoppedAt
+                    allOk = ($null -eq $stoppedAt)
+                    steps = $out
+                }
             }
 
             'screeninfo' {
@@ -1021,6 +1311,33 @@ while ($true) {
                 $result = [ordered]@{ ok = $true; length = ([string]$a.text).Length }
             }
 
+            'ocr' {
+                $region = if ($a.region) { [string]$a.region } else { '0,0,2560,1440' }
+                $rp = $region -split ','
+                if ($rp.Count -ne 4) { throw "Region должен быть 'x,y,w,h', получено '$region'" }
+                $tmp = [System.IO.Path]::GetTempFileName() + '.png'
+                $bmp = $null; $g = $null
+                try {
+                    $w = [int]$rp[2]; $h = [int]$rp[3]
+                    if ($w -le 0 -or $h -le 0) { throw "Пустой размер области: ${w}x${h}" }
+                    $bmp = New-Object System.Drawing.Bitmap $w, $h
+                    $g = [System.Drawing.Graphics]::FromImage($bmp)
+                    $g.CopyFromScreen([int]$rp[0], [int]$rp[1], 0, 0, (New-Object System.Drawing.Size $w, $h))
+                    $g.Dispose(); $g = $null
+                    $bmp.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png)
+                } finally {
+                    if ($g) { $g.Dispose() }
+                    if ($bmp) { $bmp.Dispose() }
+                }
+                try {
+                    $r = Invoke-ScreenOcr -Path $tmp -Lang ([string]$a.lang)
+                } finally {
+                    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+                }
+                $r['origin'] = [ordered]@{ x = [int]$rp[0]; y = [int]$rp[1] }
+                $result = $r
+            }
+
             'find' {
                 $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
                                        ([string]$a.id) $(if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }) `
@@ -1188,7 +1505,24 @@ while ($true) {
 
             default { throw "Неизвестный инструмент: '$tool'" }
         }
+    return , $result
+}
+$script:In = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8)
 
+Send-Response 0 $true ([ordered]@{ ready = $true; pid = $PID; powershell = $PSVersionTable.PSVersion.ToString() }) $null
+
+while ($true) {
+    $line = [Console]::In.ReadLine()
+    if ($null -eq $line) { break }
+    if ($line.Trim() -eq '') { continue }
+
+    $id = 0
+    try {
+        $req = $line | ConvertFrom-Json
+        $id = $req.id
+        $tool = $req.tool
+        $a = $req.args
+        $result = Invoke-Tool $tool $a
         Send-Response $id $true $result $null
     } catch {
         Send-Response $id $false $null $_.Exception.Message

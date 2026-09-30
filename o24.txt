@@ -1,0 +1,11 @@
+show: { "ok": true, "state": "OK" }
+<anonymous_script>:1
+Ошибка: Инструмент 'windows' не ответил за 30 с
+^
+
+SyntaxError: Unexpected token 'О', "Ошибка: Ин"... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at file:///C:/Users/DigitalJesus/.minimax/workspace/desk-mcp/t24.mjs:11:16
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.14.0

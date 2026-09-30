@@ -1,0 +1,12 @@
+node:buffer:348
+  throw new ERR_INVALID_ARG_TYPE(
+        ^
+
+TypeError [ERR_INVALID_ARG_TYPE]: The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received undefined
+    at Buffer.from (node:buffer:348:9)
+    at file:///C:/Users/DigitalJesus/.minimax/workspace/desk-mcp/t26.mjs:12:61
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  code: 'ERR_INVALID_ARG_TYPE'
+}
+
+Node.js v24.14.0

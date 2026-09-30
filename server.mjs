@@ -186,9 +186,12 @@ server.registerTool(
     description:
       "Снимает экран и возвращает картинку, которую модель видит. region — 'x,y,w,h' " +
       "(по умолчанию весь виртуальный экран). format: png | jpeg. scale — уменьшение, " +
-      "например 0.5, чтобы не жечь токены на полноразмерном 2560x1440.",
+      "например 0.5, чтобы не жечь токены на полноразмерном 2560x1440. " +
+      "window — подстрока заголовка: снимок идёт через PrintWindow и работает даже если " +
+      "окно перекрыто другим или свёрнуто.",
     inputSchema: {
       region: z.string().optional().describe("'x,y,w,h'. Пусто — весь виртуальный экран"),
+      window: z.string().optional().describe("снимок конкретного окна через PrintWindow"),
       format: z.enum(["png", "jpeg"]).optional().default("png"),
       scale: z.number().min(0.1).max(2).optional().describe("1 = как есть, 0.5 = вдвое меньше"),
       quality: z.number().int().min(1).max(100).optional().default(80),
@@ -199,7 +202,7 @@ server.registerTool(
     return {
       content: [
         { type: "image", data: s.bytes, mimeType: s.mime },
-        { type: "text", text: `Снимок ${s.width}x${s.height} (${s.mime}, ${(s.bytes.length / 1024) | 0} КБ) в области ${s.region.x},${s.region.y} ${s.region.w}x${s.region.h}` },
+        { type: "text", text: `Снимок ${s.width}x${s.height} (${s.mime}, ${(s.bytes.length / 1024) | 0} КБ, ${s.via}) в области ${s.region.x},${s.region.y} ${s.region.w}x${s.region.h}` },
       ],
     };
   }),
@@ -395,6 +398,75 @@ server.registerTool(
     inputSchema: {},
   },
   R(async () => ok(await worker.call("selftest", {}))),
+);
+
+server.registerTool(
+  "computer_bench",
+  {
+    title: "Тестовый стенд",
+    description:
+      "Поднимает собственное окно с контролами (кнопки, поле, флажок, выпадающий список, " +
+      "список) и ведёт лог событий. Нужен для честных проверок: окно создаёт сам сервер, " +
+      "поэтому результат не зависит от того, какие окна открыты у пользователя. " +
+      "Виртуальные рабочие столы на этой машине недоступны, это замена им.",
+    inputSchema: { action: z.enum(["show", "read", "close"]) },
+  },
+  R(async (a) => ok(await worker.call("bench", a))),
+);
+
+server.registerTool(
+  "computer_desktop",
+  {
+    title: "Виртуальные рабочие столы",
+    description:
+      "Управление виртуальными рабочими столами Windows (Win+Ctrl+D). Нужен для изоляции: " +
+      "можно создать стол, перенести туда нужное окно и работать, не трогая окна пользователя. " +
+      "Действия: list, create (+switchTo), switch, close, of_window, move_window.",
+    inputSchema: {
+      action: z.enum(["list", "create", "switch", "close", "of_window", "move_window"]),
+      id: z.string().optional().describe("GUID рабочего стола для switch/close/move_window"),
+      title: z.string().optional().describe("подстрока заголовка окна для of_window/move_window"),
+      switchTo: z.boolean().optional().describe("переключиться на созданный стол сразу"),
+    },
+  },
+  R(async (a) => ok(await worker.call("desktop", a))),
+);
+
+server.registerTool(
+  "computer_batch",
+  {
+    title: "Пачка действий",
+    description:
+      "Выполняет несколько инструментов подряд за один вызов и возвращает результат каждого. " +
+      "Основной инструмент агентного цикла: не нужно делать 10 отдельных вызовов ради " +
+      "«открыть, ввести, нажать, снять». Останавливается на первой ошибке, если у шага не " +
+      "задано stopOnError: false.",
+    inputSchema: {
+      steps: z.array(z.object({
+        tool: z.string().describe("имя инструмента desk-mcp"),
+        args: z.record(z.any()).optional(),
+        stopOnError: z.boolean().optional(),
+      })).min(1).max(50),
+    },
+  },
+  R(async (a) => ok(await worker.call("batch", a, 120_000))),
+);
+
+server.registerTool(
+  "computer_ocr",
+  {
+    title: "Распознать текст на экране",
+    description:
+      "Читает текст прямо из пикселей через OCR-движок, встроенный в Windows " +
+      "(Windows.Media.Ocr, поддерживает русский). Ноль моделей и нулевых зависимостей. Нужен там, " +
+      "где нет ни UIA, ни MSAA: игры, видео, GPU-контент, UWP-приложения. " +
+      "Возвращает строки и слова с границами — по границе слова можно кликнуть.",
+    inputSchema: {
+      region: z.string().optional().describe("'x,y,w,h'. По умолчанию — весь экран 2560x1440"),
+      lang: z.string().optional().describe("например 'ru-RU' или 'en-US'; по умолчанию — язык профиля"),
+    },
+  },
+  R(async (a) => ok(await worker.call("ocr", a, 60_000))),
 );
 
 server.registerTool(
@@ -898,42 +970,71 @@ server.registerTool(
   R(async (a) => {
     const target = await cdp.pickTarget(a.url);
     const client = await cdp.socket(target);
-    await cdp.evaluate(client, PROBE_JS);
-    const before = await cdp.evaluate(client, "location.href");
 
-    const raw = await cdp.evaluate(client, `(() => {
+    const locate = () => cdp.evaluate(client, `(() => {
         const el = document.querySelector(${JSON.stringify(a.selector)});
         if (!el) return "NULL";
-        el.scrollIntoView({ block: "center", inline: "center" });
+        el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
         const r = el.getBoundingClientRect();
         return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
       })()`);
+
+    const strike = async () => {
+      for (let i = 0; i < a.clickCount; i++) {
+        await client.send("Input.dispatchMouseEvent", {
+          type: "mousePressed", x: BOX.x, y: BOX.y, button: a.button, clickCount: 1,
+        });
+        await client.send("Input.dispatchMouseEvent", {
+          type: "mouseReleased", x: BOX.x, y: BOX.y, button: a.button, clickCount: 1,
+        });
+        if (i + 1 < a.clickCount) await new Promise((r) => setTimeout(r, 60));
+      }
+    };
+
+    await cdp.evaluate(client, PROBE_JS);
+    const before = await cdp.evaluate(client, "location.href");
+
+    // Без bringToFront Chrome отбрасывает синтетический ввод, если вкладка не
+    // на переднем плане: Input.dispatchMouseEvent молча уходит в никуда, а
+    // модель получает verified:false и гадает почему.
+    try {
+      await client.send("Page.enable");
+      await client.send("Page.bringToFront");
+      await new Promise((r) => setTimeout(r, 250));
+    } catch { /* браузер может быть в другой вкладке — не критично */ }
+
+    let raw = await locate();
     if (raw === "NULL") throw new Error(`Селектор не найден: ${a.selector}`);
-    const box = JSON.parse(raw);
+    let BOX = JSON.parse(raw);
+    await strike();
+    await new Promise((r) => setTimeout(r, 350));
+    let hits = JSON.parse(await cdp.evaluate(client, READ_PROBE_JS));
+    let after = await cdp.evaluate(client, "location.href");
+    let navigated = before !== after;
+    let retried = false;
 
-    for (let i = 0; i < a.clickCount; i++) {
-      await client.send("Input.dispatchMouseEvent", {
-        type: "mousePressed", x: box.x, y: box.y, button: a.button, clickCount: 1,
-      });
-      await client.send("Input.dispatchMouseEvent", {
-        type: "mouseReleased", x: box.x, y: box.y, button: a.button, clickCount: 1,
-      });
-      if (i + 1 < a.clickCount) await new Promise((r) => setTimeout(r, 60));
+    // Промах по координате после плавной прокрутки — обычное дело: элемент
+    // уехал между замером и кликом. Один ретрай с перезамером дешевле, чем
+    // выдавать модели ложь verified:false.
+    if (hits.length === 0 && !navigated) {
+      retried = true;
+      raw = await locate();
+      if (raw !== "NULL") {
+        BOX = JSON.parse(raw);
+        await strike();
+        await new Promise((r) => setTimeout(r, 400));
+        hits = JSON.parse(await cdp.evaluate(client, READ_PROBE_JS));
+        after = await cdp.evaluate(client, "location.href");
+        navigated = before !== after;
+      }
     }
-    await new Promise((r) => setTimeout(r, 400));
 
-    // Проба живёт в window.__deskProbe и умирает вместе со страницей при
-    // переходе — то есть ровно на самом интересном случае клика. Поэтому
-    // вторым доказательством служит смена адреса: страница уехала = клик
-    // гарантированно попал.
-    const hits = JSON.parse(await cdp.evaluate(client, READ_PROBE_JS));
-    const after = await cdp.evaluate(client, "location.href");
-    const navigated = before !== after;
     return ok({
       ok: true,
       selector: a.selector,
       verified: hits.length > 0 || navigated,
       via: hits.length > 0 ? "probe" : navigated ? "navigation" : "none",
+      retried,
       hit: hits[0] ?? null,
       urlBefore: before,
       urlAfter: after,
