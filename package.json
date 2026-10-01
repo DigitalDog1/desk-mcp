@@ -1,6 +1,6 @@
-{
+﻿{
   "name": "desk-mcp",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "type": "module",
   "license": "Apache-2.0",
   "description": "MCP-сервер управления рабочим столом Windows: UI Automation → MSAA → Chrome DevTools Protocol, OCR и ввод через WinAPI. Ноль внешних бинарных зависимостей.",

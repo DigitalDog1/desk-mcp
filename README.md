@@ -164,17 +164,49 @@ rather than doing the arithmetic yourself:
 Both require an explicit `confirm: true` and refuse without it. Text on screen
 is untrusted data, not instructions.
 
+## When a window hangs
+
+UI Automation talks to other applications through COM, and this is the one
+place where the server can genuinely hang: an application with a modal dialog,
+a frozen UI thread or old WPF holds the RPC open and the call never returns.
+
+The worker is single-threaded, so a full isolation of UIA in an STA thread with
+a hard cancellation is **not** available here: a PowerShell `ScriptBlock` is
+bound to its runspace and refuses to execute on a foreign thread. What is
+available, and what this server does:
+
+- **A hard budget of 8 s per UIA call** instead of 15. For scale: a full UIA
+  traversal of every window on this machine measures 116 ms, so the budget is
+  still generous by two orders of magnitude.
+- **A circuit breaker, per window.** After a timeout the worker is restarted and
+  the key `tool|window` is blocked for 90 s. While blocked, calls to that
+  window fail immediately with an explanation instead of stalling again. Other
+  windows keep working — one application's bug is not everyone's outage.
+- **Three-layer degradation on reads.** UIA → MSAA → OCR. `computer_read_screen`
+  never returns an empty window list quietly: if both accessibility trees are
+  empty it falls through to OCR and says so in `backend` and `degraded`.
+
+`DESK_UI_TIMEOUT_MS` and `DESK_UI_COOLDOWN_MS` override the two budgets.
+
+What is still open: the UIA call itself is not cancellable, so the 8 s is real
+time lost on the first call against a hung window, and the worker restart also
+drops any in-flight non-UIA call. Solving that properly means moving the tree
+walk out of PowerShell and into C#. The OCR fallback captures the window through
+`PrintWindow`, which is also a synchronous call into the target — same risk.
+
+`computer_batch` is executed step by step on the server side, not as one
+recursive call inside the worker. That is what makes it subject to the same
+budgets and the same breaker: a batch step is just another tool call.
+
 ## Limitations
 
 - **Exclusive fullscreen** (games, video): `CopyFromScreen` returns black.
-  This needs DXGI Desktop Duplication.
-- **UWP windows** expose neither a UIA nor an MSAA tree.
+  This needs DXGI Desktop Duplication. Note that windowed D3D9 titles do come
+  through `PrintWindow` — verified on Counter-Strike: Source.
+- **UWP windows** expose neither a UIA nor an MSAA tree; reads fall through to
+  OCR, which means no element names.
 - **Virtual desktops** depend on the Windows build: on 10 19035
   `VirtualDesktopManager.dll` is absent and the tool returns an error.
-- **The worker is single-threaded**: a hung UIA call blocks the queue. The
-  treatment is a 15 s timeout, killing the process and restarting it. For scale:
-  a full UIA traversal of every window on this machine measures 116 ms, so the
-  budget is generous by two orders of magnitude.
 
 ## Tests
 
@@ -182,10 +214,12 @@ is untrusted data, not instructions.
 npm test
 ```
 
-Expected tail: `ИТОГ: 47 ок, 0 провалов`. The suite **does not move the
+Expected tail: `ИТОГ: 49 ок, 0 провалов`. The suite **does not move the
 cursor** — read-only: screenshots, windows, trees, OCR, clipboard, CDP reads.
 `computer_batch` is covered too: MCP tool names inside `steps`, name
-normalization, and `stopOnError` on both paths.
+normalization, and `stopOnError` on both paths. The UIA circuit breaker is
+covered by booting a second server with a deliberately absurd 1 ms budget and
+checking that the first call hangs, the second is blocked, and both say why.
 
 ## Windows gotchas
 

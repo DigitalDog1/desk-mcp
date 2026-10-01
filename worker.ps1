@@ -1216,45 +1216,6 @@ function Invoke-Tool {
                 }
             }
 
-            'batch' {
-                $steps = @($a.steps)
-                if ($steps.Count -eq 0) { throw "steps пуст" }
-                if ($steps.Count -gt 50) { throw "Слишком много шагов за раз: $($steps.Count), максимум 50" }
-                $known = @('active_window', 'bench', 'click', 'clipboard_get', 'clipboard_set', 'close_window', 'cursor', 'desktop', 'drag', 'element_at', 'find', 'focus', 'invoke', 'key', 'key_down', 'key_up', 'launch', 'mouse_button', 'mouse_move', 'move', 'ocr', 'permissions', 'read_screen', 'screeninfo', 'screenshot', 'scroll', 'select_text', 'set_frame', 'set_value', 'type', 'verify', 'wait', 'wait_window', 'windows')
-                $rename = @{ 'computer_window_set_frame' = 'set_frame'; 'computer_verify_state' = 'verify' }
-                $out = @()
-                $stoppedAt = $null
-                for ($i = 0; $i -lt $steps.Count; $i++) {
-                    $s = $steps[$i]
-                    $given = [string]$s.tool
-                    $stepTool = $given
-                    if ($rename.ContainsKey($stepTool)) { $stepTool = $rename[$stepTool] }
-                    elseif ($stepTool.StartsWith('computer_')) { $stepTool = $stepTool.Substring(9) }
-                    $stepArgs = $s.args
-                    if (-not $stepArgs) { $stepArgs = @{} }
-                    if ($known -notcontains $stepTool) {
-                        $out += [ordered]@{ index = $i; tool = $given; ok = $false; error = "Неизвестный инструмент: '$given'. В batch ждут: $($known -join ', ')" }
-                        if ($s.stopOnError -eq $false) { continue }
-                        $stoppedAt = $i
-                        break
-                    }
-                    try {
-                        $res = Invoke-Tool $stepTool $stepArgs
-                        $out += [ordered]@{ index = $i; tool = $given; ok = $true; data = $res }
-                    } catch {
-                        $out += [ordered]@{ index = $i; tool = $given; ok = $false; error = $_.Exception.Message }
-                        if ($s.stopOnError -eq $false) { continue }
-                        $stoppedAt = $i
-                        break
-                    }
-                }
-                $result = [ordered]@{
-                    executed = $out.Count
-                    stoppedAt = $stoppedAt
-                    allOk = (@($out | Where-Object { -not $_.ok }).Count -eq 0)
-                    steps = $out
-                }
-            }
 
             'screeninfo' {
                 $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -1521,8 +1482,71 @@ function Invoke-Tool {
                         windows = $msaa
                     }
                 } else {
-                    $uia['backend'] = 'uia'
-                    $result = $uia
+                    # Третья ступень деградации. Окно не отдаёт дерево доступности
+                    # ни через UIA, ни через MSAA — типично для игр, UWP, флеша и
+                    # защищённого контента. Отдавать пустой массив окон здесь
+                    # бессмысленно: вызывающий всё равно пойдёт за скриншотом.
+                    # Лучше сразу дать текст из пикселей и сказать, какой слой сработал.
+                    $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+                    $region = "$($vs.Left),$($vs.Top),$($vs.Width),$($vs.Height)"
+                    $winTitle = ''
+                    $captureHwnd = [IntPtr]::Zero
+                    if ($title) {
+                        $w = Find-WindowByTitle $title 2
+                        if ($w -and $w.rect -and $w.rect.w -gt 0 -and $w.rect.h -gt 0) {
+                            $region = "$($w.rect.x),$($w.rect.y),$($w.rect.w),$($w.rect.h)"
+                            $winTitle = $w.title
+                            $proc = Get-Process -Id $w.process -ErrorAction SilentlyContinue
+                            if ($proc) { $captureHwnd = $proc.MainWindowHandle }
+                        }
+                    }
+                    $rp = $region -split ','
+                    $lines = @()
+                    $via = 'screen'
+                    $tmpBase = $null
+                    try {
+                        $tmpBase = [System.IO.Path]::GetTempFileName()
+                        $tmp = "$tmpBase.png"
+                        # Окно снимаем через PrintWindow, а не CopyFromScreen: окно
+                        # может быть свёрнуто или перекрыто, и с экрана попал бы
+                        # кто-то другой. В режим окна D3D9/11 PrintWindow даёт кадр.
+                        if ($captureHwnd -ne [IntPtr]::Zero) {
+                            $wbmp = [DeskMcp]::CaptureWindow($captureHwnd)
+                            if ($wbmp) {
+                                try { $wbmp.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png); $via = 'window' }
+                                finally { $wbmp.Dispose() }
+                            }
+                        }
+                        if (-not (Test-Path -LiteralPath $tmp)) {
+                            $bmp = New-Object System.Drawing.Bitmap ([int]$rp[2]), ([int]$rp[3])
+                            try {
+                                $g = [System.Drawing.Graphics]::FromImage($bmp)
+                                try { $g.CopyFromScreen([int]$rp[0], [int]$rp[1], 0, 0, (New-Object System.Drawing.Size ([int]$rp[2]), ([int]$rp[3]))) }
+                                finally { $g.Dispose() }
+                                $bmp.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png)
+                            } finally { $bmp.Dispose() }
+                        }
+                        $o = Invoke-ScreenOcr -Path $tmp -Lang ''
+                        if ($o -and $o.lines) { $lines = @($o.lines) }
+                    } catch { }
+                    finally {
+                        if ($tmpBase) {
+                            Remove-Item "$tmpBase.png" -Force -ErrorAction SilentlyContinue
+                            Remove-Item $tmpBase -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+                    $result = [ordered]@{
+                        backend = 'ocr'
+                        degraded = $true
+                        elementsScanned = (Count-NamedUiInside $uia.windows)
+                        note = 'UIA и MSAA вернули пустое дерево: окно не отдаёт дерево доступности (игры, UWP, защищённый контент). Взят OCR. Координаты строк локальны относительно region — при клике прибавь origin.'
+                        window = $winTitle
+                        region = $region
+                        origin = [ordered]@{ x = [int]$rp[0]; y = [int]$rp[1] }
+                        via = $via
+                        lines = $lines
+                        windows = @()
+                    }
                 }
             }
 
@@ -1544,7 +1568,11 @@ function Invoke-Tool {
                 $region = if ($a.region) { [string]$a.region } else { '0,0,2560,1440' }
                 $rp = $region -split ','
                 if ($rp.Count -ne 4) { throw "Region должен быть 'x,y,w,h', получено '$region'" }
-                $tmp = [System.IO.Path]::GetTempFileName() + '.png'
+                # GetTempFileName СОЗДАЁТ файл на диске. Если дописать к нему
+                # '.png' и удалить только результат, базовый tmpXXXX.tmp остаётся
+                # навсегда: один нулевой файл на каждый вызов, измерено.
+                $tmpBase = [System.IO.Path]::GetTempFileName()
+                $tmp = "$tmpBase.png"
                 $bmp = $null; $g = $null
                 try {
                     $w = [int]$rp[2]; $h = [int]$rp[3]
@@ -1562,6 +1590,7 @@ function Invoke-Tool {
                     $r = Invoke-ScreenOcr -Path $tmp -Lang ([string]$a.lang)
                 } finally {
                     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+                    Remove-Item $tmpBase -Force -ErrorAction SilentlyContinue
                 }
                 $r['origin'] = [ordered]@{ x = [int]$rp[0]; y = [int]$rp[1] }
                 $result = $r
@@ -1586,30 +1615,48 @@ function Invoke-Tool {
                 $pair = @($hits)[0]
                 $el = $pair[0]
                 $info = Convert-ElementInfo $pair
+                # InvokePattern на неактивном элементе в Windows молча ничего не
+                # делает и при этом не бросает исключение: проверено на Paint,
+                # где серая кнопка «Копировать» вернула ok, а буфер не изменился.
+                # Ложный «нажал» хуже отказа, поэтому проверяем заранее.
+                if ($info['enabled'] -eq $false) {
+                    throw "Элемент '$($info['name'])' неактивен (enabled=false): приложение его отключило, нажать нельзя. Нажатие отчиталось бы успехом, но ничего не изменит."
+                }
+                $invokeErr = $null
                 try {
                     $ip = $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
                     $ip.Invoke()
                     $result = [ordered]@{ ok = $true; via = 'InvokePattern'; element = $info }
                     break
-                } catch { }
+                } catch { $invokeErr = $_.Exception.Message }
                 $r = $info['rect']
-                if ($r['w'] -le 0 -or $r['h'] -le 0) { throw "У элемента нет InvokePattern и нулевые границы: $($r | ConvertTo-Json -Compress)" }
+                if ($r['w'] -le 0 -or $r['h'] -le 0) {
+                    throw "У элемента нет InvokePattern ('$invokeErr') и нулевые границы: $($r | ConvertTo-Json -Compress) — нажать нечем"
+                }
                 $cx = $r['x'] + [int]($r['w'] / 2)
                 $cy = $r['y'] + [int]($r['h'] / 2)
                 [DeskMcp]::MoveTo($cx, $cy)
                 Start-Sleep -Milliseconds 120
                 [DeskMcp]::Click('left', 1)
-                $result = [ordered]@{ ok = $true; via = 'pixel'; x = $cx; y = $cy; element = $info }
+                $result = [ordered]@{
+                    ok = $true; via = 'pixel'; x = $cx; y = $cy; element = $info
+                    invokeError = $invokeErr
+                    note = 'InvokePattern не сработал, сделан клик по центру границ — мышь захвачена, окно могло получить фокус'
+                }
             }
 
             'set_value' {
                 $hits = Resolve-Target $a
                 if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден" }
                 $el = @($hits)[0][0]
+                $info = Convert-ElementInfo @($hits)[0]
+                if ($info['enabled'] -eq $false) {
+                    throw "Элемент '$($info['name'])' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
+                }
                 try {
                     $vp = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
                     $vp.SetValue([string]$a.value)
-                    $result = [ordered]@{ ok = $true; via = 'ValuePattern'; value = [string]$a.value }
+                    $result = [ordered]@{ ok = $true; via = 'ValuePattern'; value = [string]$a.value; element = $info }
                 } catch {
                     throw "У элемента нет доступного для записи ValuePattern: $($_.Exception.Message)"
                 }
@@ -1620,6 +1667,9 @@ function Invoke-Tool {
                                        ([string]$a.id) $(if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }) 1
                 if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден" }
                 $info = Convert-ElementInfo @($hits)[0]
+                if ($info['enabled'] -eq $false) {
+                    throw "Элемент '$($info['name'])' неактивен (enabled=false): поле отключено, выделять нечего."
+                }
                 $r = $info['rect']
                 [DeskMcp]::MoveTo($r['x'] + [int]($r['w'] / 2), $r['y'] + [int]($r['h'] / 2))
                 Start-Sleep -Milliseconds 150

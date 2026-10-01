@@ -212,5 +212,55 @@ for (const [n, a] of neg) {
   else { fail++; console.log(`  ПРОПУЩЕНО ${n} вернул данные: ${detail}`); }
 }
 
+console.log("== деградация и circuit breaker ==");
+await check("computer_read_screen",
+  { title: "ОкнаКоторогоНет12345", maxDepth: 3, maxElements: 50 },
+  (r, txt) => /"backend":\s*"(uia|msaa|ocr)"/.test(txt) && /"windows"/.test(txt));
+
+// Circuit breaker живёт в server.mjs и по замыслу переживает перезапуск
+// воркера, поэтому проверить его в общем прогоне нельзя: нужного зависания
+// там не случится. Поднимаем второй сервер с заведомо смешным бюджетом —
+// один миллисекунду вместо восьми секунд.
+{
+  const tb = Date.now();
+  const t2 = new StdioClientTransport({
+    command: "node",
+    args: [path.join(__dirname, "server.mjs")],
+    stderr: "pipe",
+    env: { ...process.env, DESK_UI_TIMEOUT_MS: "1", DESK_UI_COOLDOWN_MS: "60000" },
+  });
+  const c2 = new Client({ name: "smoke-breaker", version: "1.0.0" });
+  try {
+    await c2.connect(t2);
+    const a1 = await c2.callTool({ name: "computer_find", arguments: { title: "ZzzBroken", name: "ZZZ" } });
+    const t1 = a1.content?.[0]?.text ?? "";
+    const a2 = await c2.callTool({ name: "computer_find", arguments: { title: "ZzzBroken", name: "ZZZ" } });
+    const t2t = a2.content?.[0]?.text ?? "";
+    // PowerShell -like регистронезависим, поэтому ZzzBroken и zzzbroken — одно
+    // окно. Смена регистра не должна обходить блокировку.
+    const a3 = await c2.callTool({ name: "computer_find", arguments: { title: "zzzbroken", name: "ZZZ" } });
+    const t3 = a3.content?.[0]?.text ?? "";
+    // Batch обязан идти через тот же breaker, иначе обходит его целиком.
+    const a4 = await c2.callTool({
+      name: "computer_batch",
+      arguments: { steps: [{ tool: "computer_find", args: { title: "ZzzBroken", name: "ZZZ" } }] },
+    });
+    const t4 = a4.content?.[0]?.text ?? "";
+    const good = /зависла/.test(t1) && /отключена/.test(t2t) && /отключена/.test(t3) && /отключена/.test(t4);
+    if (good) {
+      pass++;
+      console.log(`  ОК   circuit breaker: зависание, повтор, смена регистра и batch — всё заблокировано (${Date.now() - tb} мс)`);
+    } else {
+      fail++;
+      console.log(`  СБОЙ circuit breaker: 1=${t1.slice(0, 80)} | 2=${t2t.slice(0, 80)} | 3=${t3.slice(0, 80)} | batch=${t4.slice(0, 120)}`);
+    }
+  } catch (e) {
+    fail++;
+    console.log(`  ОШИБКА circuit breaker: ${e.message.slice(0, 200)}`);
+  } finally {
+    try { await c2.close(); } catch { /* уже закрыт */ }
+  }
+}
+
 console.log(`\nИТОГ: ${pass} ок, ${fail} провалов`);
 await c.close();

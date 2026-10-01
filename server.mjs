@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
  * desk-mcp — MCP-сервер управления рабочим столом Windows.
  *
@@ -215,9 +215,77 @@ const R = (fn) => async (args) => {
   }
 };
 
+// --- UI Automation: бюджет времени и circuit breaker --------------------------
+//
+// UI Automation ходит в чужое приложение через COM, и это единственное место,
+// где сервер может по-настоящему зависнуть: приложение с модальным окном,
+// зависшим UI-потоком или старым WPF держит RPC, и вызов не возвращается
+// никогда. Watchdog ниже всё равно перезапустит воркер, но без этого
+// ограничителя каждая следующая попытка повторяла бы полный простой.
+//
+// Ключ блокировки — инструмент плюс окно. Окно может одно не отвечать, пока
+// остальные живы: блокировать всё подряд было бы наказанием за чужой баг.
+const UI_TIMEOUT_MS = Number(process.env.DESK_UI_TIMEOUT_MS) || 8_000;
+const UI_COOLDOWN_MS = Number(process.env.DESK_UI_COOLDOWN_MS) || 90_000;
+const uiSuspect = new Map();
+
+function uiKey(tool, a) {
+  const t = a && typeof a === "object" ? a.title || a.id || "" : "";
+  // PowerShell -like регистронезависим, поэтому 'ZzzBroken' и 'zzzbroken' — то
+  // же окно. Без приведения к нижнему регистру блокировку обходили сменой
+  // регистра одной буквы.
+  return `${tool}|${String(t).trim().toLowerCase() || "*"}`;
+}
+
+// Общий дедлайн на весь вызов, а не только на обмен с воркером: ensure() с
+// паузой 30 с при пяти зависаниях подряд выполняется ДО постановки таймера,
+// и объявленный бюджет в 8 с превращался в реальные 30+ с.
+function deadline(promise, ms, what) {
+  let timer;
+  const guard = new Promise((_, rej) => {
+    timer = setTimeout(() => rej(new Error(`${what} не успел за ${ms / 1000} с (включая ожидание перезапуска воркера)`)), ms);
+  });
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+}
+
+async function callUi(tool, args, timeoutMs = UI_TIMEOUT_MS) {
+  const key = uiKey(tool, args);
+  const until = uiSuspect.get(key);
+  const now = Date.now();
+  for (const [k, v] of uiSuspect) if (v <= now) uiSuspect.delete(k);
+  if (until && until > now) {
+    const left = Math.ceil((until - now) / 1000);
+    throw new Error(
+      `UI Automation к '${key}' отключена на ${left} с после зависания: окно не отвечает. ` +
+        `Повторный вызов её не вылечит — бери другой слой: computer_screenshot + computer_ocr, ` +
+        `MSAA-слой computer_read_screen без окна, или работай с другим окном.`,
+    );
+  }
+  try {
+    const r = await deadline(worker.call(tool, args, timeoutMs), timeoutMs + 2_000, `UI Automation '${key}'`);
+    uiSuspect.delete(key);
+    return r;
+  } catch (e) {
+    if (/не ответил|не успел/.test(e.message || "")) {
+      uiSuspect.set(key, Date.now() + UI_COOLDOWN_MS);
+      throw new Error(
+        `UI Automation зависла на '${key}': нет ответа ${timeoutMs / 1000} с, воркер перезапущен. ` +
+          `Окно не отвечает на UIA — следующие вызовы к нему заблокированы на ${UI_COOLDOWN_MS / 1000} с. ` +
+          `Дальше: computer_screenshot + computer_ocr или другое окно.`,
+      );
+    }
+    throw e;
+  }
+}
+
+// Инструменты, которые ходят в UI Automation. У batch они идут через callUi,
+// иначе breaker обходится целиком: batch исполняется в воркере рекурсивно и
+// минует любые проверки на стороне сервера.
+const UI_TOOLS = new Set(["read_screen", "element_at", "find", "invoke", "set_value", "select_text", "verify"]);
+
 // --- сервер -------------------------------------------------------------------
 
-const server = new McpServer({ name: "desk-mcp", version: "1.0.0" });
+const server = new McpServer({ name: "desk-mcp", version: "1.1.0" });
 
 const ok = (data) => ({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
 
@@ -429,7 +497,7 @@ server.registerTool(
                   "UIA не работает для Discord/Chrome/VSCode, пока они не запущены с --force-renderer-accessibility"),
     },
   },
-  R(async (a) => ok(await worker.call("read_screen", a, 15_000))),
+  R(async (a) => ok(await callUi("read_screen", a))),
 );
 
 server.registerTool(
@@ -441,7 +509,7 @@ server.registerTool(
       "Вызывай перед кликом, если координаты взяты из скриншота.",
     inputSchema: { x: z.number().int(), y: z.number().int() },
   },
-  R(async (a) => ok(await worker.call("element_at", a))),
+  R(async (a) => ok(await callUi("element_at", a))),
 );
 
 server.registerTool(
@@ -517,8 +585,62 @@ server.registerTool(
       })).min(1).max(50),
     },
   },
-  R(async (a) => ok(await worker.call("batch", a, 120_000))),
+  R(async (a) => ok(await deadline(runBatch(a.steps), 120_000, "computer_batch"))),
 );
+
+// Пачка исполняется на стороне сервера, по одному шагу, а не рекурсией внутри
+// воркера. Иначе UIA-шаги выполнялись бы в обход callUi: ни таймаута, ни
+// circuit breaker, и одна зависшая пачка уносила с собой все 50 шагов.
+// Минус — потеря атомарности, плюс — каждый шаг виден, ограничен и защищён.
+const WORKER_TOOLS = new Set([
+  "active_window", "bench", "click", "clipboard_get", "clipboard_set", "close_window",
+  "cursor", "desktop", "drag", "element_at", "find", "focus", "invoke", "key", "key_down",
+  "key_up", "launch", "mouse_button", "mouse_move", "move", "ocr", "permissions",
+  "read_screen", "screeninfo", "screenshot", "scroll", "select_text", "set_frame",
+  "set_value", "type", "verify", "wait", "wait_window", "windows",
+]);
+
+const TOOL_ALIAS = {
+  computer_window_set_frame: "set_frame",
+  computer_verify_state: "verify",
+};
+
+async function runBatch(steps) {
+  const out = [];
+  let stoppedAt = null;
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i] || {};
+    const given = String(s.tool ?? "");
+    let tool = given;
+    if (TOOL_ALIAS[tool]) tool = TOOL_ALIAS[tool];
+    else if (tool.startsWith("computer_")) tool = tool.slice("computer_".length);
+    const args = s.args ?? {};
+    const stopOnError = s.stopOnError !== false;
+    if (!WORKER_TOOLS.has(tool)) {
+      out.push({
+        index: i, tool: given, ok: false,
+        error: `Неизвестный инструмент: '${given}'. Доступны: ${[...WORKER_TOOLS].join(", ")}`,
+      });
+      if (stopOnError) { stoppedAt = i; break; }
+      continue;
+    }
+    try {
+      const data = UI_TOOLS.has(tool)
+        ? await callUi(tool, args)
+        : await worker.call(tool, args, 60_000);
+      out.push({ index: i, tool: given, ok: true, data });
+    } catch (e) {
+      out.push({ index: i, tool: given, ok: false, error: e.message });
+      if (stopOnError) { stoppedAt = i; break; }
+    }
+  }
+  return {
+    executed: out.length,
+    stoppedAt,
+    allOk: out.every((x) => x.ok),
+    steps: out,
+  };
+}
 
 server.registerTool(
   "computer_ocr",
@@ -557,7 +679,7 @@ server.registerTool(
       limit: z.number().int().min(1).max(50).optional().default(20),
     },
   },
-  R(async (a) => ok(await worker.call("find", a, 15_000))),
+  R(async (a) => ok(await callUi("find", a))),
 );
 
 server.registerTool(
@@ -576,7 +698,7 @@ server.registerTool(
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
-  R(async (a) => ok(await worker.call("invoke", a, 15_000))),
+  R(async (a) => ok(await callUi("invoke", a))),
 );
 
 server.registerTool(
@@ -596,7 +718,7 @@ server.registerTool(
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
-  R(async (a) => ok(await worker.call("set_value", a, 15_000))),
+  R(async (a) => ok(await callUi("set_value", a))),
 );
 
 server.registerTool(
@@ -609,7 +731,7 @@ server.registerTool(
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
-  R(async (a) => ok(await worker.call("select_text", a, 15_000))),
+  R(async (a) => ok(await callUi("select_text", a))),
 );
 
 server.registerTool(
@@ -635,7 +757,7 @@ server.registerTool(
       })).min(1).max(8),
     },
   },
-  R(async (a) => ok(await worker.call("verify", a, 15_000))),
+  R(async (a) => ok(await callUi("verify", a))),
 );
 
 server.registerTool(
