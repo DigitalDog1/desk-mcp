@@ -59,23 +59,63 @@ if (winList) {
     target = all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200);
   } catch { /* список не разобрался — просто пропустим привязанные проверки */ }
 }
-const tKey = target ? target.title.slice(0, 24) : "";
+const keyOf = (t) => (t ? t.title.slice(0, 24) : "");
+let tKey = keyOf(target);
 console.log(`  цель для чтения: ${tKey ? "'" + tKey + "'" : "нет подходящих окон — привязанные проверки пропущены"}`);
 
+// Заголовок окна живёт своей жизнью: у браузера он меняется при каждом открытии
+// и закрытии вкладки, так что между выбором цели и вызовом окно могло
+// переименоваться или закрыться. Один перевыбор по живому списку дешевле
+// внятного «не найдено за 3 с» в середине прогона.
+const retarget = async () => {
+  try {
+    const r = await c.callTool({ name: "computer_windows", arguments: {} });
+    const all = JSON.parse(r.content[0].text).windows || [];
+    const hit = all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200);
+    if (hit) { tKey = keyOf(hit); return true; }
+  } catch { /* перевыбор не удался */ }
+  return false;
+};
+
+const checkTarget = async (name, args, verify) => {
+  const run = async (a) => {
+    const t0 = Date.now();
+    try {
+      const r = await c.callTool({ name, arguments: a });
+      const txt = r.content?.[0]?.text ?? "";
+      const bad = r.isError === true || txt.startsWith("Ошибка:");
+      return { ok: verify ? verify(r, txt) : !bad, txt, err: null, ms: Date.now() - t0 };
+    } catch (e) {
+      return { ok: false, txt: "", err: e.message, ms: Date.now() - t0 };
+    }
+  };
+  let res = await run(args);
+  const why = `${res.txt} ${res.err ?? ""}`;
+  if (tKey && /не найден|не найдена|Не найдено/i.test(why) && (await retarget())) {
+    const retry = { ...args };
+    if (retry.window !== undefined) retry.window = tKey;
+    else retry.title = tKey;
+    res = await run(retry);
+  }
+  if (res.ok) { pass++; console.log(`  ОК   ${name} (${res.ms} мс)`); }
+  else { fail++; console.log(`  СБОЙ ${name} (${res.ms} мс): ${(res.err || res.txt).slice(0, 160)}`); }
+  return res;
+};
+
 console.log("== цели (чтение) ==");
-const tree = tKey ? await check("computer_read_screen", { title: tKey, maxDepth: 5, maxElements: 120, interactiveOnly: true },
+const tree = tKey ? await checkTarget("computer_read_screen", { title: tKey, maxDepth: 5, maxElements: 120, interactiveOnly: true },
   (r, t) => t.length > 200) : null;
-const treeMsaa = tKey ? await check("computer_read_screen", { title: tKey, maxDepth: 6, maxElements: 200, interactiveOnly: true, backend: "auto" },
+const treeMsaa = tKey ? await checkTarget("computer_read_screen", { title: tKey, maxDepth: 6, maxElements: 200, interactiveOnly: true, backend: "auto" },
   (r, t) => t.includes("backend")) : null;
 await check("computer_element_at", { x: 1280, y: 700 }, (r, t) => t.includes("found"));
 void shot; void scaled; void tree; void treeMsaa;
 
 console.log("== семантика (перенос из computer-use) ==");
-await check("computer_find", { title: tKey, type: "Button", limit: 3 }, (r, t) => t.includes('"count"'));
-await check("computer_find", { title: tKey, limit: 1 },
+await checkTarget("computer_find", { title: tKey, type: "Button", limit: 3 }, (r, t) => t.includes('"count"'));
+await checkTarget("computer_find", { title: tKey, limit: 1 },
   (r, t) => t.includes("rect") && t.includes("patterns"));
 await check("computer_active_window", {}, (r, t) => t.includes('"pid"'));
-await check("computer_verify_state", { title: tKey, expect: [
+await checkTarget("computer_verify_state", { title: tKey, expect: [
   { label: "кнопка есть", selector: { role: "Button", label_contains: "Новая вкладка" } },
   { label: "нет такого", selector: { role: "Button", label_contains: "ZZZнеттакого" } },
 ] }, (r, t) => t.includes("unsatisfied"));
@@ -120,7 +160,7 @@ try {
 console.log("== OCR, окна, пачки ==");
 await check("computer_ocr", { region: "300,250,1300,500", lang: "ru-RU" },
   (r, t) => t.includes("lineCount"));
-await check("computer_screenshot", { window: tKey, scale: 0.4 },
+await checkTarget("computer_screenshot", { window: tKey, scale: 0.4 },
   (r, t) => !!r.content.find((c) => c.type === "image"));
 await check("computer_batch", { steps: [
   { tool: "cursor" },

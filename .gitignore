@@ -39,3 +39,5 @@ printwindow.png
 publish.ps1
 _t_*.txt
 _g_*.txt
+_c_*
+_c-*.mjs

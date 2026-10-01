@@ -285,7 +285,7 @@ const UI_TOOLS = new Set(["read_screen", "element_at", "find", "invoke", "set_va
 
 // --- сервер -------------------------------------------------------------------
 
-const server = new McpServer({ name: "desk-mcp", version: "1.1.0" });
+const server = new McpServer({ name: "desk-mcp", version: "1.2.0" });
 
 const ok = (data) => ({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
 
@@ -858,6 +858,18 @@ const cdp = {
     return list.filter((t) => t.type === "page" && t.webSocketDebuggerUrl);
   },
 
+  // /json/new требует именно PUT: на GET современные Chrome и Edge отвечают
+  // 405. Метод держим здесь, а не в вызывающем коде, потому что забыть про PUT
+  // — это молчаливое «вкладка не открылась».
+  async newTab(url) {
+    const res = await fetch(`http://127.0.0.1:${cdp.port}/json/new?${encodeURIComponent(url)}`, {
+      method: "PUT",
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) throw new Error(`CDP не смог открыть вкладку: HTTP ${res.status} ${await res.text().catch(() => "")}`);
+    return res.json();
+  },
+
   async socket(target) {
     const key = target.id ?? target.url;
     if (cdp.sockets.has(key)) return cdp.sockets.get(key);
@@ -927,9 +939,19 @@ const cdp = {
     const targets = await cdp.targets();
     if (!targets.length) throw new Error("Нет ни одной вкладки — сначала computer_browser_start");
     if (!urlHint) return targets[0];
-    const hit = targets.find((t) => t.url.includes(urlHint));
+    // Ищем и по URL, и по заголовку: параметр называется url, но вызывающий
+    // почти всегда знает именно заголовок вкладки. Раньше поиск шёл только по
+    // URL, и на подсказку «Вкладка не найдена» выводился список заголовков,
+    // в котором нужная вкладка была — выглядит как поломка поиска.
+    const lower = String(urlHint).toLowerCase();
+    const hit =
+      targets.find((t) => t.url.includes(urlHint))
+      ?? targets.find((t) => (t.title ?? "").toLowerCase().includes(lower));
     if (!hit) {
-      throw new Error(`Вкладка с '${urlHint}' не найдена. Есть: ${targets.map((t) => t.title).join(" | ")}`);
+      throw new Error(
+        `Вкладка с '${urlHint}' не найдена (ищем по URL и по заголовку). ` +
+          `Есть: ${targets.map((t) => `${t.title} <${t.url.slice(0, 60)}>`).join(" | ")}`,
+      );
     }
     return hit;
   },
@@ -1034,8 +1056,19 @@ server.registerTool(
     cdp.port = a.port ?? 9222;
     try {
       const v = await cdp.version();
+      // Браузер уже слушает порт. Раньше url в этом случае просто терялся:
+      // вызывающий отправлял адрес, получал ok:true, а вкладки с этим адресом
+      // не появлялось — и следующий computer_browser_tree честно отвечал
+      // «вкладка не найдена». Поэтому адрес открываем явно.
+      if (a.url) {
+        const tab = await cdp.newTab(a.url);
+        return ok({ ok: true, alreadyRunning: true, browser: v.Browser, port: cdp.port, opened: { id: tab.id, title: tab.title, url: tab.url } });
+      }
       return ok({ ok: true, alreadyRunning: true, browser: v.Browser, port: cdp.port });
-    } catch { /* нужно поднимать */ }
+    } catch (e) {
+      if (a.url) throw new Error(`Браузер на порту ${cdp.port} отвечает, но вкладку с '${a.url}' открыть не вышло: ${e.message}`);
+      throw e;
+    }
     const pf86 = process.env[["ProgramFiles", "(x86)"].join("")] ?? "C:\\Program Files (x86)";
     const candidates = {
       chrome: [
