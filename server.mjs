@@ -404,7 +404,7 @@ server.registerTool(
                   "UIA не работает для Discord/Chrome/VSCode, пока они не запущены с --force-renderer-accessibility"),
     },
   },
-  R(async (a) => ok(await worker.call("read_screen", a, 30_000))),
+  R(async (a) => ok(await worker.call("read_screen", a, 15_000))),
 );
 
 server.registerTool(
@@ -532,7 +532,7 @@ server.registerTool(
       limit: z.number().int().min(1).max(50).optional().default(20),
     },
   },
-  R(async (a) => ok(await worker.call("find", a, 30_000))),
+  R(async (a) => ok(await worker.call("find", a, 15_000))),
 );
 
 server.registerTool(
@@ -551,7 +551,7 @@ server.registerTool(
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
-  R(async (a) => ok(await worker.call("invoke", a, 30_000))),
+  R(async (a) => ok(await worker.call("invoke", a, 15_000))),
 );
 
 server.registerTool(
@@ -571,7 +571,7 @@ server.registerTool(
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
-  R(async (a) => ok(await worker.call("set_value", a, 30_000))),
+  R(async (a) => ok(await worker.call("set_value", a, 15_000))),
 );
 
 server.registerTool(
@@ -584,7 +584,7 @@ server.registerTool(
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
-  R(async (a) => ok(await worker.call("select_text", a, 30_000))),
+  R(async (a) => ok(await worker.call("select_text", a, 15_000))),
 );
 
 server.registerTool(
@@ -610,7 +610,7 @@ server.registerTool(
       })).min(1).max(8),
     },
   },
-  R(async (a) => ok(await worker.call("verify", a, 30_000))),
+  R(async (a) => ok(await worker.call("verify", a, 15_000))),
 );
 
 server.registerTool(

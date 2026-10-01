@@ -4,6 +4,29 @@
 
 $ErrorActionPreference = 'Continue'
 
+# Процесс должен объявить себя DPI-aware ДО любых UI-вызовов. Иначе на
+# мониторе с масштабированием (125%, 150%) координаты из UIA и OCR приходят
+# в логических единицах, а SendInput жмёт в физических пикселях, и клик уезжает
+# мимо цели на десятки пикселей. Проверено: без этого вызов процесс помечается
+# как DPI_UNAWARE.
+if (-not ("DpiFix" -as [type])) {
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class DpiFix {
+  [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr v);
+  [DllImport("shcore.dll")] static extern int SetProcessDpiAwareness(int a);
+  public static string Apply() {
+    try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return "per-monitor-v2"; } catch { }
+    try { if (SetProcessDpiAwarenessContext(new IntPtr(-3))) return "per-monitor-v1"; } catch { }
+    try { if (SetProcessDpiAwareness(2) == 0) return "per-monitor"; } catch { }
+    return "unaware";
+  }
+}
+'@
+}
+$DpiMode = [DpiFix]::Apply()
+
 if (-not ("DeskMcp" -as [type])) {
 Add-Type -TypeDefinition @'
 using System;
@@ -1616,6 +1639,7 @@ function Invoke-Tool {
                     screenshotBytes = $s.bytes.Length
                     windows = $wins.Count
                     sendInputOk = ($n -eq 2)
+                    dpi = $DpiMode
                     pid = $PID
                 }
             }

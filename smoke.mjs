@@ -45,23 +45,37 @@ const scaled = await check("computer_screenshot", { region: "0,0,1280,720", scal
   (r) => !!r.content.find((c) => c.type === "image" && c.mimeType === "image/jpeg"));
 
 console.log("== окна (чтение) ==");
-await check("computer_windows", { filter: "Microsoft" }, (r, t) => !t.includes("Ошибка"));
+const winList = await check("computer_windows", {}, (r, t) => t.includes('"count"'));
 await check("computer_active_window", {}, (r, t) => t.includes('"pid"'));
 
+// Цель для чтения выбираем динамически: привязка к «Discord» или «Параметры»
+// ломала прогон каждый раз, когда пользователь закрывал это окно. Берём
+// первое видимое окно приличного размера — тест проверяет механизм,
+// а не то, что у кого-то открыт конкретный апп.
+let target = null;
+if (winList) {
+  try {
+    const all = JSON.parse(winList.content[0].text).windows || [];
+    target = all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200);
+  } catch { /* список не разобрался — просто пропустим привязанные проверки */ }
+}
+const tKey = target ? target.title.slice(0, 24) : "";
+console.log(`  цель для чтения: ${tKey ? "'" + tKey + "'" : "нет подходящих окон — привязанные проверки пропущены"}`);
+
 console.log("== цели (чтение) ==");
-const tree = await check("computer_read_screen", { title: "Discord", maxDepth: 5, maxElements: 120, interactiveOnly: true },
-  (r, t) => t.length > 200);
-const treeMsaa = await check("computer_read_screen", { title: "Discord", maxDepth: 6, maxElements: 200, interactiveOnly: true, backend: "auto" },
-  (r, t) => t.includes("backend"));
+const tree = tKey ? await check("computer_read_screen", { title: tKey, maxDepth: 5, maxElements: 120, interactiveOnly: true },
+  (r, t) => t.length > 200) : null;
+const treeMsaa = tKey ? await check("computer_read_screen", { title: tKey, maxDepth: 6, maxElements: 200, interactiveOnly: true, backend: "auto" },
+  (r, t) => t.includes("backend")) : null;
 await check("computer_element_at", { x: 1280, y: 700 }, (r, t) => t.includes("found"));
 void shot; void scaled; void tree; void treeMsaa;
 
 console.log("== семантика (перенос из computer-use) ==");
-await check("computer_find", { title: "Discord", type: "Button", limit: 3 }, (r, t) => t.includes('"count"'));
-await check("computer_find", { title: "Discord", name: "Почта", limit: 1 },
+await check("computer_find", { title: tKey, type: "Button", limit: 3 }, (r, t) => t.includes('"count"'));
+await check("computer_find", { title: tKey, limit: 1 },
   (r, t) => t.includes("rect") && t.includes("patterns"));
 await check("computer_active_window", {}, (r, t) => t.includes('"pid"'));
-await check("computer_verify_state", { title: "Discord", expect: [
+await check("computer_verify_state", { title: tKey, expect: [
   { label: "кнопка есть", selector: { role: "Button", label_contains: "Новая вкладка" } },
   { label: "нет такого", selector: { role: "Button", label_contains: "ZZZнеттакого" } },
 ] }, (r, t) => t.includes("unsatisfied"));
@@ -106,7 +120,7 @@ try {
 console.log("== OCR, окна, пачки ==");
 await check("computer_ocr", { region: "300,250,1300,500", lang: "ru-RU" },
   (r, t) => t.includes("lineCount"));
-await check("computer_screenshot", { window: "Параметры", scale: 0.4 },
+await check("computer_screenshot", { window: tKey, scale: 0.4 },
   (r, t) => !!r.content.find((c) => c.type === "image"));
 await check("computer_batch", { steps: [
   { tool: "cursor" },
@@ -144,7 +158,7 @@ const neg = [
   ["computer_read_screen", { maxDepth: 999 }],
   ["computer_invoke", { title: "Microsoft", name: "ZZZнеттакойкнопки", type: "Button" }],
   ["computer_find", { title: "Microsoft", name: "ZZZнеттакого", type: "Button" }],
-  ["computer_verify_state", { title: "Discord", expect: [] }],
+  ["computer_verify_state", { title: tKey, expect: [] }],
   ["computer_key_down", { key: "ZZZнеттакой" }],
   ["computer_wait", { ms: 999999 }],
   ["computer_browser_tree", { url: "нет-такой-вкладки" }],

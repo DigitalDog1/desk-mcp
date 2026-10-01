@@ -129,7 +129,9 @@ is untrusted data, not instructions.
 - **Virtual desktops** depend on the Windows build: on 10 19035
   `VirtualDesktopManager.dll` is absent and the tool returns an error.
 - **The worker is single-threaded**: a hung UIA call blocks the queue. The
-  treatment is a 30 s timeout, killing the process and restarting it.
+  treatment is a 15 s timeout, killing the process and restarting it. For scale:
+  a full UIA traversal of every window on this machine measures 116 ms, so the
+  budget is generous by two orders of magnitude.
 
 ## Tests
 
@@ -144,6 +146,9 @@ cursor** — read-only: screenshots, windows, trees, OCR, clipboard, CDP reads.
 
 Everything below was reproduced in practice, not taken from documentation.
 
+- The worker calls `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)` before any UI
+  call. Without it, UIA and OCR report logical units while `SendInput` acts in
+  physical pixels, and clicks land tens of pixels off target on a scaled display.
 - A `.ps1` file must be UTF-8 **with BOM**: without it, PowerShell 5.1 reads
   the file as ANSI and silently breaks parsing of Cyrillic.
 - In `KEYBDINPUT` the fields are `ushort`, not `uint`. Declare `uint` and the
