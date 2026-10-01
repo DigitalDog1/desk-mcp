@@ -1,4 +1,4 @@
-﻿# desk-mcp
+# desk-mcp
 <p align="center">
   <a href="README.md">English</a> &nbsp;|&nbsp; <a href="README.ru.md">Русский</a>
 </p>
