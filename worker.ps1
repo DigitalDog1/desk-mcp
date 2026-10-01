@@ -112,6 +112,54 @@ public class DeskMcp {
 
     public static void MoveTo(int x, int y) { SetCursorPos(x, y); }
 
+    public static void MoveBy(int dx, int dy, int steps, int stepMs) {
+        int remainX = dx, remainY = dy;
+        for (int pass = 0; pass < 4; pass++) {
+            if (remainX == 0 && remainY == 0) break;
+            POINT before, after;
+            if (!GetCursorPos(out before)) break;
+            SendMove(remainX, remainY, steps, stepMs);
+            System.Threading.Thread.Sleep(30);
+            if (!GetCursorPos(out after)) break;
+            int nx = remainX - (after.X - before.X);
+            int ny = remainY - (after.Y - before.Y);
+            if (nx == remainX && ny == remainY) break;
+            remainX = nx; remainY = ny;
+            if (Math.Abs(remainX) <= 1 && Math.Abs(remainY) <= 1) break;
+            steps = steps > 2 ? steps / 2 : 1;
+        }
+    }
+
+    static void SendMove(int dx, int dy, int steps, int stepMs) {
+        if (steps < 1) steps = 1;
+        int sx = dx / steps, sy = dy / steps;
+        int rx = dx - sx * steps, ry = dy - sy * steps;
+        for (int i = 0; i < steps; i++) {
+            int ax = sx + (Math.Abs(rx) > i ? Math.Sign(rx) : 0);
+            int ay = sy + (Math.Abs(ry) > i ? Math.Sign(ry) : 0);
+            mouse_event(MOVE, unchecked((uint)ax), unchecked((uint)ay), 0, IntPtr.Zero);
+            if (stepMs > 0) System.Threading.Thread.Sleep(stepMs);
+        }
+    }
+
+    public static void ClickWithNudge(string button, int count, int nudgePx) {
+        uint down, up;
+        if (button == "right")       { down = RIGHTDOWN; up = RIGHTUP; }
+        else if (button == "middle"){ down = MIDDLEDOWN; up = MIDDLEUP; }
+        else                        { down = LEFTDOWN;   up = LEFTUP; }
+        int n = nudgePx < 0 ? -nudgePx : nudgePx;
+        for (int i = 0; i < count; i++) {
+            mouse_event(down, 0, 0, 0, IntPtr.Zero);
+            System.Threading.Thread.Sleep(30);
+            if (n > 0) {
+                mouse_event(MOVE, unchecked((uint)n), 0, 0, IntPtr.Zero);
+                System.Threading.Thread.Sleep(20);
+            }
+            mouse_event(up, 0, 0, 0, IntPtr.Zero);
+            if (i + 1 < count) System.Threading.Thread.Sleep(90);
+        }
+    }
+
     public static void Click(string button, int count) {
         uint down, up;
         if (button == "right")       { down = RIGHTDOWN; up = RIGHTUP; }
@@ -1172,7 +1220,7 @@ function Invoke-Tool {
                 $steps = @($a.steps)
                 if ($steps.Count -eq 0) { throw "steps пуст" }
                 if ($steps.Count -gt 50) { throw "Слишком много шагов за раз: $($steps.Count), максимум 50" }
-                $known = @('active_window', 'bench', 'click', 'clipboard_get', 'clipboard_set', 'close_window', 'cursor', 'desktop', 'drag', 'element_at', 'find', 'focus', 'invoke', 'key', 'key_down', 'key_up', 'launch', 'mouse_button', 'move', 'ocr', 'permissions', 'read_screen', 'screeninfo', 'screenshot', 'scroll', 'select_text', 'set_frame', 'set_value', 'type', 'verify', 'wait', 'wait_window', 'windows')
+                $known = @('active_window', 'bench', 'click', 'clipboard_get', 'clipboard_set', 'close_window', 'cursor', 'desktop', 'drag', 'element_at', 'find', 'focus', 'invoke', 'key', 'key_down', 'key_up', 'launch', 'mouse_button', 'mouse_move', 'move', 'ocr', 'permissions', 'read_screen', 'screeninfo', 'screenshot', 'scroll', 'select_text', 'set_frame', 'set_value', 'type', 'verify', 'wait', 'wait_window', 'windows')
                 $rename = @{ 'computer_window_set_frame' = 'set_frame'; 'computer_verify_state' = 'verify' }
                 $out = @()
                 $stoppedAt = $null
@@ -1227,6 +1275,13 @@ function Invoke-Tool {
             'permissions' { $result = Test-Permissions }
 
             'click' {
+                $scale = 1.0
+                if ($null -ne $a.scale) { $scale = [double]$a.scale }
+                if ($scale -le 0) { throw "scale должен быть больше нуля, получено '$($a.scale)'" }
+                $cx = [int][math]::Round([double]$a.x / $scale)
+                $cy = [int][math]::Round([double]$a.y / $scale)
+                $nudge = 0
+                if ($null -ne $a.nudge) { $nudge = [int]$a.nudge }
                 $mods = @()
                 if ($a.modifiers) {
                     foreach ($m in $a.modifiers) {
@@ -1235,24 +1290,31 @@ function Invoke-Tool {
                         $mods += $mv
                     }
                 }
-                if ($a.hoverFirst) { [DeskMcp]::MoveTo([int]$a.x, [int]$a.y); Start-Sleep -Milliseconds 250 }
-                elseif ($mods.Count -gt 0) { [DeskMcp]::MoveTo([int]$a.x, [int]$a.y); Start-Sleep -Milliseconds 60 }
+                if ($a.hoverFirst) { [DeskMcp]::MoveTo($cx, $cy); Start-Sleep -Milliseconds 250 }
+                elseif ($mods.Count -gt 0) { [DeskMcp]::MoveTo($cx, $cy); Start-Sleep -Milliseconds 60 }
                 $wasDown = @()
                 foreach ($m in $mods) {
                     $wasDown += [DeskMcp]::KeyDown([uint16]$m)
                     [DeskMcp]::VKey([uint16]$m, $false)
                 }
                 Start-Sleep -Milliseconds 30
-                [DeskMcp]::Click($(if ($a.button) { $a.button } else { 'left' }), $(if ($a.count) { [int]$a.count } else { 1 }))
+                $btn = $(if ($a.button) { $a.button } else { 'left' })
+                $cnt = $(if ($a.count) { [int]$a.count } else { 1 })
+                if ($nudge -ne 0) { [DeskMcp]::ClickWithNudge($btn, $cnt, $nudge) }
+                else { [DeskMcp]::Click($btn, $cnt) }
                 Start-Sleep -Milliseconds 30
                 for ($i = $mods.Count - 1; $i -ge 0; $i--) {
                     if (-not $wasDown[$i]) { [DeskMcp]::VKey([uint16]$mods[$i], $true) }
                 }
                 $result = [ordered]@{
-                    ok = $true; x = [int]$a.x; y = [int]$a.y
-                    button = $(if ($a.button) { $a.button } else { 'left' })
-                    count = $(if ($a.count) { [int]$a.count } else { 1 })
+                    ok = $true; x = $cx; y = $cy
+                    button = $btn
+                    count = $cnt
                     modifiers = $a.modifiers
+                    scale = $scale
+                    nudge = $nudge
+                    requestedX = [int]$a.x
+                    requestedY = [int]$a.y
                 }
             }
 
@@ -1295,6 +1357,28 @@ function Invoke-Tool {
             'move' {
                 [DeskMcp]::MoveTo([int]$a.x, [int]$a.y)
                 $result = [ordered]@{ ok = $true; x = [int]$a.x; y = [int]$a.y }
+            }
+
+            'mouse_move' {
+                $dx = 0; $dy = 0
+                if ($null -ne $a.dx) { $dx = [int]$a.dx }
+                if ($null -ne $a.dy) { $dy = [int]$a.dy }
+                $steps = 1
+                if ($null -ne $a.steps) { $steps = [int]$a.steps }
+                $stepMs = 0
+                if ($null -ne $a.stepMs) { $stepMs = [int]$a.stepMs }
+                if ($steps -lt 1) { throw "steps должен быть не меньше 1, получено $steps" }
+                if ($steps -gt 500) { throw "steps слишком много: $steps, максимум 500" }
+                if ($stepMs -lt 0 -or $stepMs -gt 200) { throw "stepMs должен быть в диапазоне 0..200, получено $stepMs" }
+                [DeskMcp]::MoveBy($dx, $dy, $steps, $stepMs)
+                Start-Sleep -Milliseconds 40
+                $pt = New-Object 'DeskMcp+POINT'
+                $got = [DeskMcp]::GetCursorPos([ref]$pt)
+                if (-not $got) { throw "GetCursorPos вернул false" }
+                $result = [ordered]@{
+                    ok = $true; dx = $dx; dy = $dy; steps = $steps; stepMs = $stepMs
+                    x = $pt.X; y = $pt.Y
+                }
             }
 
             'drag' {

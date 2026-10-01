@@ -37,3 +37,4 @@ printwindow.png
 *.log
 
 publish.ps1
+_t_*.txt

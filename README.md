@@ -50,7 +50,7 @@ Python, no `uvx`, no native modules.
   probe **or** a URL change.
 - `computer_selftest` — checks the whole channel at once.
 
-41 tools in total. Schema and descriptions: run `node server.mjs`, or connect any
+42 tools in total. Schema and descriptions: run `node server.mjs`, or connect any
 MCP client.
 
 ## Install
@@ -115,6 +115,48 @@ pattern and the click went to the center of the bounds — treat the result with
 more suspicion. A tool that found nothing refuses honestly: that is a finding,
 not a reason to click blind coordinates.
 
+## Games
+
+Aiming in a shooter is the one case where a plain click-and-move is useless, and
+the reason is not a defect in the tool.
+
+With **raw input** enabled (the default in Counter-Strike and most Source
+games), the engine reads only hardware mouse packets and ignores synthetic
+input completely: buttons fire, the camera does not turn. Turning it off makes
+the engine read `WM_MOUSEMOVE` deltas, which `SetCursorPos` and `SendInput`
+both produce. For Counter-Strike: Source, one line in
+`<game>/cstrike/cfg/autoexec.cfg`:
+
+```
+rawinput 0
+```
+
+Then aim with relative movement:
+
+```json
+{ "tool": "computer_mouse_move", "args": { "dx": 220, "dy": -40, "steps": 20, "stepMs": 8 } }
+```
+
+`steps` matters: games apply sensitivity to every mouse event, so one 220 px jump
+reads as a flick and twenty small steps read as a hand. The tool also measures
+how far the cursor actually moved and tops up the remainder, because Windows
+coalesces injected motion.
+
+Drawing apps need the opposite trick — they ignore a click with no motion at
+all between button-down and button-up:
+
+```json
+{ "tool": "computer_click", "args": { "x": 800, "y": 400, "nudge": 1 } }
+```
+
+And if your coordinates came from a downscaled screenshot, pass the same scale
+rather than doing the arithmetic yourself:
+
+```json
+{ "tool": "computer_screenshot", "args": { "region": "0,0,2560,1440", "scale": 0.5 } }
+{ "tool": "computer_click", "args": { "x": 640, "y": 360, "scale": 0.5 } }
+```
+
 ## Safety
 
 `computer_close_window` and `computer_launch` are destructive and irreversible.
@@ -139,7 +181,7 @@ is untrusted data, not instructions.
 npm test
 ```
 
-Expected tail: `ИТОГ: 43 ок, 0 провалов`. The suite **does not move the
+Expected tail: `ИТОГ: 47 ок, 0 провалов`. The suite **does not move the
 cursor** — read-only: screenshots, windows, trees, OCR, clipboard, CDP reads.
 `computer_batch` is covered too: MCP tool names inside `steps`, name
 normalization, and `stopOnError` on both paths.

@@ -164,6 +164,10 @@ await check("computer_batch",
   { steps: [{ tool: "computer_verify_state", args: { expect: [{ window: { exists: false } }] } }] },
   (r, txt) => /"allOk":\s*true/.test(txt));
 
+console.log("== относительное движение (нулевое — курсор не трогаем) ==");
+await check("computer_mouse_move", { dx: 0, dy: 0, steps: 3 },
+  (r, txt) => /"ok":\s*true/.test(txt) && /"steps":\s*3/.test(txt) && /"x":\s*\d+/.test(txt));
+
 console.log("== негативные сценарии (должны дать внятную ошибку) ==");
 const neg = [
   ["computer_screenshot", { region: "мусор" }],
@@ -180,6 +184,9 @@ const neg = [
   ["computer_screenshot", { window: "ОкнаКоторогоНет12345" }],
   ["computer_batch", { steps: [] }],
   ["computer_batch", { steps: [{ tool: "нетакойтул" }, { tool: "cursor" }] }],
+  ["computer_mouse_move", { dx: 0, dy: 0, steps: 0 }],
+  ["computer_mouse_move", { dx: 0, dy: 0, steps: 999 }],
+  ["computer_mouse_move", { dx: 0, dy: 0, stepMs: 9999 }],
   ["computer_click", { x: 1, y: 1, modifiers: ["nosuchmod"] }],
 ];
 for (const [n, a] of neg) {

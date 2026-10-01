@@ -278,13 +278,20 @@ server.registerTool(
     title: "Клик мышью",
     description:
       "Кликает в точку. hoverFirst — навести и подождать 250 мс перед кликом: " +
-      "обязателен для кнопок, которые рисуются только под курсором, иначе клик уходит в пустоту.",
+      "обязателен для кнопок, которые рисуются только под курсором, иначе клик уходит в пустоту. " +
+      "nudge — сдвинуть курсор на N пикселей между нажатием и отпусканием: Paint и другие " +
+      "приложения с холстом игнорируют клик без движения мыши и рисуют при этом ровно ничего. " +
+      "scale — координаты пришли с уменьшенного снимка: укажи тот же scale, и координаты пересчитаются.",
     inputSchema: {
       x: z.number().int(),
       y: z.number().int(),
       button: z.enum(["left", "right", "middle"]).optional().default("left"),
       count: z.number().int().min(1).max(5).optional().default(1),
       hoverFirst: z.boolean().optional().default(false),
+      nudge: z.number().int().min(1).max(50).optional()
+        .describe("сдвиг на N пикселей между нажатием и отпусканием: нужно Paint, холстам, играм с raw input"),
+      scale: z.number().positive().optional().default(1)
+        .describe("координаты со снимка, снятого с таким же scale: 0.5 означает вдвое меньшую картинку"),
       modifiers: z.array(z.enum(["ctrl", "shift", "alt", "win"])).optional()
         .describe("удержать модификаторы во время клика: ctrl+click закрывает вкладку, shift+click расширяет выбор"),
     },
@@ -296,6 +303,24 @@ server.registerTool(
   "computer_move",
   { title: "Навести мышь", description: "Перемещает курсор в точку, ничего не нажимая.", inputSchema: { x: z.number().int(), y: z.number().int() } },
   R(async (a) => ok(await worker.call("move", a))),
+);
+
+server.registerTool(
+  "computer_mouse_move",
+  {
+    title: "Сдвинуть мышь относительно",
+    description:
+      "Относительное перемещение курсора на dx/dy пикселей — то, что нужно для обзора в шутерах. " +
+      "Делит движение на шаги: игры применяют чувствительность к каждому событию мыши, поэтому " +
+      "один прыжок на 500 пикселей выглядит как флик, а 20 шагов по 8 мс — как движение руки.",
+    inputSchema: {
+      dx: z.number().int(),
+      dy: z.number().int(),
+      steps: z.number().int().min(1).max(500).optional().default(1),
+      stepMs: z.number().int().min(0).max(200).optional().default(0),
+    },
+  },
+  R(async (a) => ok(await worker.call("mouse_move", a))),
 );
 
 server.registerTool(
