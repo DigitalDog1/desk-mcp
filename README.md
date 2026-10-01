@@ -1,4 +1,4 @@
-# desk-mcp
+﻿# desk-mcp
 
 <p align="center">
   <a href="README.md">English</a> &nbsp;|&nbsp; <a href="README.ru.md">Русский</a>
@@ -120,18 +120,19 @@ not a reason to click blind coordinates.
 Aiming in a shooter is the one case where a plain click-and-move is useless, and
 the reason is not a defect in the tool.
 
-With **raw input** enabled (the default in Counter-Strike and most Source
-games), the engine reads only hardware mouse packets and ignores synthetic
-input completely: buttons fire, the camera does not turn. Turning it off makes
-the engine read `WM_MOUSEMOVE` deltas, which `SetCursorPos` and `SendInput`
-both produce. For Counter-Strike: Source, one line in
-`<game>/cstrike/cfg/autoexec.cfg`:
+Most shooters read mouse movement through **raw input**: the engine consumes only
+hardware mouse packets and ignores synthetic input completely, so buttons fire
+while the camera does not turn. The fix is to aim with *relative* movement
+instead of absolute positioning, and to disable raw input where the game exposes
+that switch:
 
-```
-rawinput 0
-```
+| Game | Switch | Verified |
+| --- | --- | --- |
+| Counter-Strike: Source (Source 2013) | none needed — `rawinput`/`cl_rawinput` do **not** exist, the engine reads `WM_MOUSEMOVE` | yes, live |
+| CS:GO / CS2 | `cl_rawinput 0` in console or `+cl_rawinput 0` in launch options | not verified |
+| Steam Input ("Force Steam Input") | turn off per game — it injects raw input of its own | not verified |
 
-Then aim with relative movement:
+Aim with relative movement:
 
 ```json
 { "tool": "computer_mouse_move", "args": { "dx": 220, "dy": -40, "steps": 20, "stepMs": 8 } }
@@ -232,4 +233,4 @@ code alone does not reveal.
 
 ## License
 
-MIT. Windows public APIs are used per Microsoft's documentation.
+Apache License 2.0. Windows public APIs are used per Microsoft's documentation.
