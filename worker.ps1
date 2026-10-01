@@ -1172,19 +1172,30 @@ function Invoke-Tool {
                 $steps = @($a.steps)
                 if ($steps.Count -eq 0) { throw "steps пуст" }
                 if ($steps.Count -gt 50) { throw "Слишком много шагов за раз: $($steps.Count), максимум 50" }
+                $known = @('active_window', 'bench', 'click', 'clipboard_get', 'clipboard_set', 'close_window', 'cursor', 'desktop', 'drag', 'element_at', 'find', 'focus', 'invoke', 'key', 'key_down', 'key_up', 'launch', 'mouse_button', 'move', 'ocr', 'permissions', 'read_screen', 'screeninfo', 'screenshot', 'scroll', 'select_text', 'set_frame', 'set_value', 'type', 'verify', 'wait', 'wait_window', 'windows')
+                $rename = @{ 'computer_window_set_frame' = 'set_frame'; 'computer_verify_state' = 'verify' }
                 $out = @()
                 $stoppedAt = $null
                 for ($i = 0; $i -lt $steps.Count; $i++) {
                     $s = $steps[$i]
-                    $stepTool = [string]$s.tool
+                    $given = [string]$s.tool
+                    $stepTool = $given
+                    if ($rename.ContainsKey($stepTool)) { $stepTool = $rename[$stepTool] }
+                    elseif ($stepTool.StartsWith('computer_')) { $stepTool = $stepTool.Substring(9) }
                     $stepArgs = $s.args
                     if (-not $stepArgs) { $stepArgs = @{} }
+                    if ($known -notcontains $stepTool) {
+                        $out += [ordered]@{ index = $i; tool = $given; ok = $false; error = "Неизвестный инструмент: '$given'. В batch ждут: $($known -join ', ')" }
+                        if ($s.stopOnError -eq $false) { continue }
+                        $stoppedAt = $i
+                        break
+                    }
                     try {
                         $res = Invoke-Tool $stepTool $stepArgs
-                        $out += [ordered]@{ index = $i; tool = $stepTool; ok = $true; data = $res }
-                        if ($s.stopOnError -eq $false) { continue }
+                        $out += [ordered]@{ index = $i; tool = $given; ok = $true; data = $res }
                     } catch {
-                        $out += [ordered]@{ index = $i; tool = $stepTool; ok = $false; error = $_.Exception.Message }
+                        $out += [ordered]@{ index = $i; tool = $given; ok = $false; error = $_.Exception.Message }
+                        if ($s.stopOnError -eq $false) { continue }
                         $stoppedAt = $i
                         break
                     }
@@ -1192,7 +1203,7 @@ function Invoke-Tool {
                 $result = [ordered]@{
                     executed = $out.Count
                     stoppedAt = $stoppedAt
-                    allOk = ($null -eq $stoppedAt)
+                    allOk = (@($out | Where-Object { -not $_.ok }).Count -eq 0)
                     steps = $out
                 }
             }

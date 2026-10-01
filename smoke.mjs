@@ -150,6 +150,20 @@ console.log("== буфер ==");
 await check("computer_clipboard_set", { text: "проверка" });
 await check("computer_clipboard_get", {}, (r, t) => t.includes('"length"'));
 
+console.log("== batch: MCP-имена в шагах, stopOnError ==");
+await check("computer_batch",
+  { steps: [{ tool: "computer_active_window" }, { tool: "computer_screeninfo" }, { tool: "computer_wait", args: { ms: 20 } }] },
+  (r, txt) => /"allOk":\s*true/.test(txt) && /"executed":\s*3/.test(txt) && /computer_active_window/.test(txt));
+await check("computer_batch",
+  { steps: [{ tool: "computer_window_set_frame", args: { title: "ОкнаКоторогоНет12345" }, stopOnError: false }, { tool: "computer_active_window" }] },
+  (r, txt) => /"allOk":\s*false/.test(txt) && /"executed":\s*2/.test(txt) && !/"stoppedAt":\s*[1-9]/.test(txt));
+await check("computer_batch",
+  { steps: [{ tool: "computer_window_set_frame", args: { title: "ОкнаКоторогоНет12345" } }, { tool: "computer_active_window" }] },
+  (r, txt) => /"allOk":\s*false/.test(txt) && /"executed":\s*1/.test(txt) && /"stoppedAt":\s*0/.test(txt));
+await check("computer_batch",
+  { steps: [{ tool: "computer_verify_state", args: { expect: [{ window: { exists: false } }] } }] },
+  (r, txt) => /"allOk":\s*true/.test(txt));
+
 console.log("== негативные сценарии (должны дать внятную ошибку) ==");
 const neg = [
   ["computer_screenshot", { region: "мусор" }],

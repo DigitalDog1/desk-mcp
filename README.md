@@ -139,8 +139,10 @@ is untrusted data, not instructions.
 npm test
 ```
 
-Expected tail: `ИТОГ: 39 ок, 0 провалов`. The suite **does not move the
+Expected tail: `ИТОГ: 43 ок, 0 провалов`. The suite **does not move the
 cursor** — read-only: screenshots, windows, trees, OCR, clipboard, CDP reads.
+`computer_batch` is covered too: MCP tool names inside `steps`, name
+normalization, and `stopOnError` on both paths.
 
 ## Windows gotchas
 
@@ -171,6 +173,15 @@ Everything below was reproduced in practice, not taken from documentation.
 - `Add-Type` compiles as C# 5, so no `$"..."` string interpolation.
 - Interpolating a name before a colon turns `"$Owner`:$Token"` into `$Owner:`,
   which PowerShell reads as a scoped variable. Write `${Owner}`.
+- **Some drawing apps need a mouse *move* between button-down and button-up.**
+  MS Paint ignores a clean click: `WM_LBUTTONDOWN` → `WM_LBUTTONUP` with no
+  `WM_MOUSEMOVE` in between draws nothing, and the flood-fill tool does not fire
+  at all. Drag by one pixel instead of clicking — `computer_drag` with
+  `toX = fromX + 1` is enough. If a click "does nothing", suspect this before
+  suspecting the click itself.
+- Paint's **Color 1 defaults to white**, and the fill tool fills with Color 1.
+  Filling a white canvas white looks exactly like a broken click. Pick a color
+  from the palette first.
 
 Change history: [CHANGELOG.md](CHANGELOG.md).
 Attribution of ideas and dependency licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
