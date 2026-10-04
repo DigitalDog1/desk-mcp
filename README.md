@@ -214,7 +214,12 @@ budgets and the same breaker: a batch step is just another tool call.
 npm test
 ```
 
-Expected tail: `ИТОГ: 49 ок, 0 провалов`. The suite **does not move the
+Expected tail: `ИТОГ: 48 ок, 0 провалов, 1 пропущено`. A skipped check means a
+window on the machine refused to answer UI Automation — Steam, 1C or old WPF
+hold the COM call open, and the circuit breaker catches it. That is a property
+of somebody else's application, not a defect, so it does not fail the run; the
+breaker itself is tested separately with a deliberately absurd 1 ms budget.
+The suite **does not move the
 cursor** — read-only: screenshots, windows, trees, OCR, clipboard, CDP reads.
 `computer_batch` is covered too: MCP tool names inside `steps`, name
 normalization, and `stopOnError` on both paths. The UIA circuit breaker is

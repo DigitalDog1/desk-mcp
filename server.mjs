@@ -858,6 +858,35 @@ const cdp = {
     return list.filter((t) => t.type === "page" && t.webSocketDebuggerUrl);
   },
 
+  // Документ может ещё грузиться, и тогда querySelectorAll вернёт пустоту без
+  // всякой ошибки: страница открылась, а дерева ноль. Наблюдалось на свеже
+  // поднятом Chrome. Поэтому перед разбором DOM ждём готовности.
+  async waitReady(client, timeoutMs) {
+    const deadline = Date.now() + Math.max(0, Math.min(10_000, timeoutMs));
+    for (;;) {
+      let state = "";
+      try {
+        state = await cdp.evaluate(client, "document.readyState");
+      } catch {
+        return { ready: false, state: "unreachable" };
+      }
+      if (state !== "loading") return { ready: true, state: state || "unknown" };
+      if (Date.now() >= deadline) return { ready: false, state: state };
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  },
+
+  // Открыть адрес в уже работающей вкладке. Запасной путь для /json/new: если
+  // браузер отвечает, но вкладку создать не дал (он умирает прямо на глазах,
+  // либо порт занят чужим процессом), навигация первой вкладки всё ещё работает.
+  async navigate(url) {    const pages = await cdp.targets();
+    if (!pages.length) return null;
+    const s = await cdp.socket(pages[0]);
+    await s.send("Page.enable", {});
+    await s.send("Page.navigate", { url });
+    return { id: pages[0].id, title: pages[0].title, url };
+  },
+
   // /json/new требует именно PUT: на GET современные Chrome и Edge отвечают
   // 405. Метод держим здесь, а не в вызывающем коде, потому что забыть про PUT
   // — это молчаливое «вкладка не открылась».
@@ -1061,14 +1090,22 @@ server.registerTool(
       // не появлялось — и следующий computer_browser_tree честно отвечал
       // «вкладка не найдена». Поэтому адрес открываем явно.
       if (a.url) {
-        const tab = await cdp.newTab(a.url);
-        return ok({ ok: true, alreadyRunning: true, browser: v.Browser, port: cdp.port, opened: { id: tab.id, title: tab.title, url: tab.url } });
+        const opened = await cdp.newTab(a.url).catch(() => null);
+        if (opened) {
+          return ok({ ok: true, alreadyRunning: true, browser: v.Browser, port: cdp.port, opened: { id: opened.id, title: opened.title, url: opened.url } });
+        }
+        // Браузер отвечает на /json/version, но вкладку не создал: он умирает
+        // прямо на глазах или порт занят чужим процессом. Раньше здесь был прямой
+        // throw и второй браузер не поднимался — вместо этого навигируем
+        // существующую вкладку, а если и это не вышло, падаем в подъём ниже.
+        const viaNav = await cdp.navigate(a.url).catch(() => null);
+        if (viaNav) {
+          return ok({ ok: true, alreadyRunning: true, browser: v.Browser, port: cdp.port, opened: viaNav, via: "navigate" });
+        }
+      } else {
+        return ok({ ok: true, alreadyRunning: true, browser: v.Browser, port: cdp.port });
       }
-      return ok({ ok: true, alreadyRunning: true, browser: v.Browser, port: cdp.port });
-    } catch (e) {
-      if (a.url) throw new Error(`Браузер на порту ${cdp.port} отвечает, но вкладку с '${a.url}' открыть не вышло: ${e.message}`);
-      throw e;
-    }
+    } catch { /* нужно поднимать */ }
     const pf86 = process.env[["ProgramFiles", "(x86)"].join("")] ?? "C:\\Program Files (x86)";
     const candidates = {
       chrome: [
@@ -1149,14 +1186,18 @@ server.registerTool(
       "Настоящее DOM-дерево: интерактивные элементы с готовым CSS-селектором, текстом, " +
       "role, value, checked и границами. В отличие от UIA/MSAA для Chromium это точные " +
       "данные без прокладок. Селектор сразу годится для computer_browser_click.",
-    inputSchema: { url: z.string().optional().describe("подстрока URL вкладки; пусто — первая") },
+    inputSchema: {
+      url: z.string().optional().describe("подстрока URL вкладки; пусто — первая"),
+      timeoutMs: z.number().int().optional().default(2000).describe("сколько ждать готовности документа перед разбором DOM"),
+    },
   },
   R(async (a) => {
     const target = await cdp.pickTarget(a.url);
     const client = await cdp.socket(target);
+    const ready = await cdp.waitReady(client, a.timeoutMs ?? 2000);
     const raw = await cdp.evaluate(client, TREE_JS);
     const items = JSON.parse(raw);
-    return ok({ url: target.url, title: target.title, count: items.length, elements: items });
+    return ok({ url: target.url, title: target.title, count: items.length, ready: ready.ready, elements: items });
   }),
 );
 
