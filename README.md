@@ -188,15 +188,40 @@ available, and what this server does:
 
 `DESK_UI_TIMEOUT_MS` and `DESK_UI_COOLDOWN_MS` override the two budgets.
 
-What is still open: the UIA call itself is not cancellable, so the 8 s is real
-time lost on the first call against a hung window, and the worker restart also
-drops any in-flight non-UIA call. Solving that properly means moving the tree
-walk out of PowerShell and into C#. The OCR fallback captures the window through
-`PrintWindow`, which is also a synchronous call into the target — same risk.
+What is still open: the worker restart also drops any in-flight non-UIA call,
+and the OCR fallback captures the window through `PrintWindow`, which is also a
+synchronous call into the target — same risk. Element *lookup* for
+`computer_invoke` and `computer_set_value` still walks the tree from
+PowerShell, because those calls need live COM objects for the patterns; only
+the read-only traversal and `computer_element_at` moved to the native layer.
 
 `computer_batch` is executed step by step on the server side, not as one
 recursive call inside the worker. That is what makes it subject to the same
 budgets and the same breaker: a batch step is just another tool call.
+
+## The native UIA layer
+
+UI Automation is the one place that can hang: it talks to other applications
+through COM, and an application with a modal dialog or a frozen UI thread holds
+the call open forever. A PowerShell `ScriptBlock` is bound to its runspace and
+refuses to run on a foreign thread, so the traversal could not simply be moved
+onto an STA thread — the traversal itself had to move.
+
+`uia-native.cs` does that: one STA thread with a queue and a hard timeout. A
+call that runs out of time poisons its thread, and the next call gets a fresh
+one while the abandoned thread dies in the background. Measured on
+Counter-Strike-free real windows: timeout fires at 1512 ms with a 1500 ms
+budget, and the following call completes in 43 ms on a new thread
+(`TID 19 → 21`).
+
+The traversal is also **about seven times faster** than the PowerShell one:
+147 ms against 1014 ms on the same qBittorrent window, with identical output
+apart from one field — `textLen`, which used to be a constant `1` because
+PowerShell returns `.Length == 1` for any scalar, while the native layer
+reports the real text length. `Get-UiTree` and `computer_element_at` use the
+native layer; the PowerShell implementation is still there and switches on
+automatically if the file is missing or fails to compile, and `computer_selftest`
+reports which path is live.
 
 ## Limitations
 

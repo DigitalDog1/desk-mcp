@@ -382,6 +382,42 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 
+$script:NativeUia = $null
+$script:NativeUiaError = $null
+$script:UiaBudgetMs = 6000
+$script:UiaDiag = $env:DESK_UIA_DIAG
+if ($env:DESK_UIA_BUDGET_MS) {
+    $parsed = 0
+    if ([int]::TryParse($env:DESK_UIA_BUDGET_MS, [ref]$parsed) -and $parsed -gt 0) { $script:UiaBudgetMs = $parsed }
+}
+if (-not ("UiaNative" -as [type])) {
+    $nativePath = Join-Path $PSScriptRoot 'uia-native.cs'
+    if (Test-Path -LiteralPath $nativePath) {
+        try {
+            Add-Type -TypeDefinition (Get-Content -Raw -LiteralPath $nativePath) `
+                -ReferencedAssemblies UIAutomationClient, UIAutomationTypes, WindowsBase, System.Drawing
+            $script:NativeUia = [UiaNative]
+        } catch {
+            $script:NativeUiaError = $_.Exception.Message
+        }
+    } else {
+        $script:NativeUiaError = "uia-native.cs не найден рядом с worker.ps1"
+    }
+}
+
+function Invoke-UiaNative([string]$method, [object[]]$argv) {
+    $flags = [System.Reflection.BindingFlags]::Public -bor [System.Reflection.BindingFlags]::Static
+    $mi = $script:NativeUia.GetMethod($method, $flags)
+    if (-not $mi) { throw "У нативного слоя UIA нет метода $method" }
+    $r = $mi.Invoke($null, $argv)
+    if ($script:UiaDiag) {
+        $script:UiaDiag = "$method($($argv -join ', ')) -> ok=$($r.Ok) статус=$($r.Status) длина=$($r.Data.Length) err='$($r.Error)' TID=$($r.ThreadId) $($r.ElapsedMs)мс"
+        [Console]::Error.WriteLine("UIA-DIAG: $($script:UiaDiag)")
+    }
+    if ($r.Ok) { return $r.Data }
+    throw "Нативный слой UIA: $method вернул '$($r.Status)' ($($r.Error))"
+}
+
 if (-not ("MsTree" -as [type])) {
 Add-Type -TypeDefinition @"
 using System;
@@ -992,13 +1028,21 @@ function Has-Prop($obj, [string]$name) {
     return ($null -ne $obj.PSObject.Properties[$name])
 }
 
+function Get-UiProp($node, [string]$name) {
+    if ($null -eq $node) { return $null }
+    if ($node -is [System.Collections.IDictionary]) { return $node[$name] }
+    $p = $node.PSObject.Properties[$name]
+    if ($p) { return $p.Value }
+    return $null
+}
+
 function Count-NamedUi($nodes) {
     $n = 0
     foreach ($x in $nodes) {
         if ($null -eq $x) { continue }
-        $name = $x['name']
+        $name = Get-UiProp $x 'name'
         if ($name -and "$name".Trim() -ne '') { $n++ }
-        $kids = $x['children']
+        $kids = Get-UiProp $x 'children'
         if ($kids) { $n += (Count-NamedUi $kids) }
     }
     return $n
@@ -1008,13 +1052,20 @@ function Count-NamedUiInside($windows) {
     $n = 0
     foreach ($w in $windows) {
         if ($null -eq $w) { continue }
-        $kids = $w['children']
+        $kids = Get-UiProp $w 'children'
         if ($kids) { $n += (Count-NamedUi $kids) }
     }
     return $n
 }
 
-function Get-UiTree([string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly) {    $root = [System.Windows.Automation.AutomationElement]::RootElement
+function Get-UiTree([string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly) {
+    if ($script:NativeUia) {
+        $argv = @([int]$script:UiaBudgetMs, [string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly)
+        $json = Invoke-UiaNative 'RunTree' $argv
+        $o = $json | ConvertFrom-Json
+        return [ordered]@{ windows = @($o.windows); elementsScanned = [int]$o.elementsScanned }
+    }
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
     $cond = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Window)
@@ -1038,6 +1089,10 @@ function Get-UiTree([string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool
 }
 
 function Get-ElementAt([int]$x, [int]$y) {
+    if ($script:NativeUia) {
+        $json = Invoke-UiaNative 'RunElementAt' @($script:UiaBudgetMs, $x, $y)
+        return ($json | ConvertFrom-Json)
+    }
     $p = New-Object System.Windows.Point($x, $y)
     $el = [System.Windows.Automation.AutomationElement]::FromPoint($p)
     if ($el -eq $null) { return [ordered]@{ found = $false } }
@@ -1785,6 +1840,9 @@ function Invoke-Tool {
                     windows = $wins.Count
                     sendInputOk = ($n -eq 2)
                     dpi = $DpiMode
+                    nativeUia = [bool]$script:NativeUia
+                    nativeUiaError = $script:NativeUiaError
+                    uiaBudgetMs = $script:UiaBudgetMs
                     pid = $PID
                 }
             }
