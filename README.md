@@ -12,41 +12,35 @@
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache 2.0" height="18">
 </p>
 
-Windows desktop control for MCP agents. Accessibility trees first, pixels only when
-there is nothing else, input through WinAPI. Node.js plus the PowerShell that ships
-with Windows: no Python, no `uvx`, no compiler, no native modules.
+Windows desktop control for MCP agents. Accessibility trees first, pixels when nothing
+else works, input through WinAPI. Node.js plus the PowerShell that ships with Windows:
+no Python, no `uvx`, no compiler, no native modules.
 
 ![desk-mcp demo: five UI Automation pattern actions on a WinForms window, no pixel clicks, the cursor never moves](docs/demo.gif)
 
-<p align="center"><sub>24 seconds, muted. <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.mp4">MP4</a> or <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.webm">WebM</a> if you want it full size or in your own player. GitHub serves both as downloads rather than inline video, which is why this is a GIF.</sub></p>
+<p align="center"><sub>24 seconds, muted. <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.mp4">MP4</a> or <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.webm">WebM</a> for the full size file. GitHub serves both as downloads, which is why this is a GIF.</sub></p>
 
 The window above is a plain WinForms app (`examples/demo-app.ps1`). Five actions, zero
-pixel clicks, and **the cursor does not move once**: it sits in the log box for the
-whole clip while `ValuePattern` and `InvokePattern` fill the field, run the search,
-reload the list, mark the parcel delivered and copy its number. Reproduce it:
-
-```bash
-node examples/demo.mjs            # or: node examples/demo.mjs --pause 1500
-```
+pixel clicks, and the cursor stays parked in the log box for the whole clip while
+`ValuePattern` and `InvokePattern` fill the field, run the search, reload the list,
+mark the parcel delivered and copy its number. Run `node examples/demo.mjs` to
+reproduce it, or add `--pause 1500` to watch each step land.
 
 ## Why this and not a screenshot loop
 
-- **Target by meaning, not by pixels.** `computer_find { name: "Search" }` returns
-  the element with its `automationId`, its rectangle and the patterns it supports.
-  A coordinate from a screenshot is already stale by the time you click it.
-- **Four read layers, and it says which one answered.** UI Automation, then MSAA
-  through `oleacc`, then the Chrome DevTools Protocol for Chromium pages, then OCR
-  from the engine inside Windows. If UIA returns an empty tree that is not an error,
-  it is the signal to fall through.
-- **A hung window is a normal event, not a dead agent.** UI Automation talks to other
-  applications over COM and never gives up on a frozen one. Here every UIA call runs
-  on an STA thread with a hard timeout, and after a timeout the `tool|window` key is
-  blocked for 90 s so the agent stops paying for the same hang. Other windows keep
-  working.
-- **Zero external binaries.** `npm install` is the whole install. No Visual C++ Build
-  Tools, no Python, nothing to compile. That is a deliberate constraint, not an
-  accident: it is what keeps `npx desk-mcp` working on a machine that has never seen
-  a build tool.
+- `computer_find { name: "Search" }` returns the element with its `automationId`, its
+  rectangle and the patterns it supports. A coordinate read off a screenshot is already
+  stale by the time you click it.
+- Four read layers, and the answer says which one spoke: UI Automation, then MSAA
+  through `oleacc`, then the Chrome DevTools Protocol for Chromium pages, then OCR from
+  the engine inside Windows. An empty UIA tree means fall through to the next layer.
+- A window that hangs does not kill the agent. UI Automation talks to other
+  applications over COM and never gives up on a frozen one. Every call here runs on an
+  STA thread with a hard timeout, and after a timeout the `tool|window` key is blocked
+  for 90 s. Other windows keep working.
+- Zero external binaries. `npm install` is the whole install: no Visual C++ Build
+  Tools, no Python, nothing to compile. That constraint is what keeps `npx desk-mcp`
+  working on a machine that has never seen a build tool.
 
 ## Install
 
@@ -129,10 +123,9 @@ node examples/demo.mjs
 clipboard: "ZX-4471-8820" (12 chars)
 ```
 
-One trap worth knowing: on a localized Windows the caption buttons come back with
-translated names (`Close`, `Maximize`, `Minimize` in Russian on a Russian install).
-Prefer `automationId` over caption text, or the agent will break on the user's
-locale.
+On a localized Windows the caption buttons come back with translated names (`Close`,
+`Maximize`, `Minimize` in Russian on a Russian install). Prefer `automationId` over
+caption text, or the agent will break on the user's locale.
 
 ## The same window with the cursor
 
@@ -141,17 +134,16 @@ locale.
 <p align="center"><sub>Same window, same visible result, other mechanism. <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo-cursor.mp4">MP4</a> or <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo-cursor.webm">WebM</a> for the full size version.</sub></p>
 
 Plain `computer_click` on coordinates, so the cursor walks and the app cannot tell
-the difference. The clip also shows a Windows trap worth knowing before you blame
-yourself: **a WinForms button ignores a synthetic click that arrives instantly.**
-`nudge` does not help it, `hoverFirst: true` does (250 ms over the control before
-the press). Measured on the same coordinates and the same window: without the hover
-the click did nothing, with it the event landed. For unknown applications, treat
-`hoverFirst: true` as the default for a pixel click.
+the difference. A WinForms button also ignores a synthetic click that arrives in the
+same instant as the cursor: `nudge` does not fix it, `hoverFirst: true` does (250 ms
+over the control before the press). Measured on the same coordinates and the same
+window, without the hover the counter stayed at 0, with it the event landed. Default
+to `hoverFirst: true` for pixel clicks into an app you have not tried yet.
 
 ## What it costs, measured
 
-Windows that were open on the machine while this was measured. Text tokens are
-`chars / 4`; image tokens follow Anthropic's `width * height / 750`.
+Text tokens are `chars / 4`, image tokens follow Anthropic's `width * height / 750`.
+These four windows were open on the machine at the time.
 
 | Window | Size | One element (`computer_find`) | Whole tree (`computer_read_screen`) | Picture (`computer_screenshot`) |
 | --- | ---: | ---: | ---: | ---: |
@@ -160,27 +152,24 @@ Windows that were open on the machine while this was measured. Text tokens are
 | Snipping Tool | 1198x1400 | 83 tokens, 16 ms | 4184 tokens, 94 ms | 2237 tokens, 80 ms |
 | MiniMax Code (Chromium) | 2576x1416 | 160 tokens, 92 ms | 471 tokens, 132 ms | 4864 tokens, 153 ms |
 
-Read it honestly, because it cuts both ways:
-
-- **Looking up one element is 9x to 147x cheaper than a picture of the same window**,
-  and it returns exact bounds and patterns. This is the mode an agent should live in.
-- **The whole tree is not a token optimization.** On Discord it is 8.5x *more*
-  expensive than a screenshot, because a message list is a lot of nodes. Use
-  `maxDepth`, `maxElements` and `interactiveOnly` (`interactiveOnly` alone took
-  Discord's tree from 18765 to 1280 tokens), or query the element you need.
-- **A screenshot is a fixed price.** It depends only on window size, so a big window
-  is expensive no matter how empty it is.
-- Latency sits between 16 ms and 600 ms for all three paths on this machine, with one
-  caveat that matters more than the numbers: **a tool call that names a window pays
-  for UI Automation before it does anything else.** If some other application stalls
-  UIA, that cost lands on every window, not just the guilty one. Measured here with a
+- Looking up one element costs 9x to 147x less than a picture of the same window, and
+  it returns exact bounds and patterns.
+- The whole tree can cost more than the screenshot: 8.5x more on Discord, where a
+  message list is a lot of nodes. `maxDepth`, `maxElements` and `interactiveOnly`
+  pull it back (`interactiveOnly` alone took Discord's tree from 18765 to 1280
+  tokens), or query the one element you need.
+- A screenshot costs the same every time, since only window size matters. A big window
+  is expensive however empty it is.
+- All three paths ran between 16 ms and 600 ms here. A call that names a window pays
+  for UI Automation before it does anything else, so if some other application stalls
+  UIA that cost lands on every window, not just the guilty one. Measured with a
   Chromium game running: every titled call went from ~250 ms to ~3.1 s
   (`computer_find` on Discord, on Edge, on a console window and on this repository's
   own window all landed at 3.0-3.2 s), while calls that do not resolve a window stayed
   fast (`computer_clipboard_get` 1-6 ms, region screenshot 63 ms). The per-window
-  breaker cannot help there, because no single window is at fault.
+  breaker cannot catch that, because no single window is at fault.
 
-Reproduce it on your own windows with `npm run bench`.
+Run `npm run bench` to measure your own windows.
 
 ## The 42 tools
 
@@ -191,7 +180,7 @@ Reproduce it on your own windows with `npm run bench`.
   scale.
 - `computer_ocr`: text straight from pixels with the OCR engine built into Windows
   (`Windows.Media.Ocr`, en and ru). Words come back with boxes, so you can click on
-  what was read. It is honest about being a fallback: on the demo window it turned
+  what was read. As a fallback it is unreliable: on the demo window it turned
   `ZX-4471-8820` into `zx-=v-882C`.
 
 **Interface tree**
@@ -261,41 +250,37 @@ without moving the mouse.
 
 ## When a window hangs
 
-This is the one place a desktop MCP server can genuinely die. UI Automation calls
-into another process over COM, and an application with a modal dialog, a frozen UI
-thread or old WPF holds the RPC open forever. A PowerShell `ScriptBlock` cannot be
-moved onto an STA thread (it is bound to its runspace), so the traversal itself had
-to move into C#. What the server does about it:
+UI Automation calls into another process over COM, and an application with a modal
+dialog, a frozen UI thread or old WPF holds the RPC open forever. A PowerShell
+`ScriptBlock` cannot be moved onto an STA thread (it is bound to its runspace), so the
+traversal itself had to move into C#. The server does four things about it:
 
-- **`uia-native.cs` runs the read path on an STA thread with a hard timeout.** A
-  call that runs out of time poisons its thread; the next call gets a fresh one while
-  the abandoned thread dies in the background. Measured: the timeout fires at
-  1512 ms against a 1500 ms budget, and the next call finishes in 43 ms on the new
-  thread (`TID 19 -> 21`).
-- **It is about seven times faster** than the PowerShell path it replaced: 147 ms
-  against 1014 ms on the same qBittorrent window, same output except `textLen`,
-  which used to report a constant `1` because PowerShell returns `.Length == 1` for
-  any scalar.
-- **A circuit breaker, per window.** After a timeout the key `tool|window` is blocked
-  for 90 s. Calls to that window fail immediately with an explanation instead of
-  stalling again. One application's bug is not everyone's outage.
-- **An 8 s budget on the whole call**, generous by two orders of magnitude: a full
+- `uia-native.cs` runs the read path on an STA thread with a hard timeout. A call that
+  runs out of time poisons its thread; the next call gets a fresh one while the
+  abandoned thread dies in the background. Measured: the timeout fires at 1512 ms
+  against a 1500 ms budget, and the next call finishes in 43 ms on the new thread
+  (`TID 19 -> 21`).
+- It is about seven times faster than the PowerShell path it replaced: 147 ms against
+  1014 ms on the same qBittorrent window, same output except `textLen`, which used to
+  report a constant `1` because PowerShell returns `.Length == 1` for any scalar.
+- A circuit breaker, per window. After a timeout the key `tool|window` is blocked for
+  90 s. Calls to that window fail immediately with an explanation instead of stalling
+  again. Other windows are unaffected.
+- An 8 s budget on the whole call, generous by two orders of magnitude: a full
   traversal of every window on this machine measures 116 ms.
 
 `DESK_UI_TIMEOUT_MS`, `DESK_UI_COOLDOWN_MS` and `DESK_UIA_BUDGET_MS` override the
-budgets. The worker budget is deliberately smaller than the server one so the worker
-can return a clear timeout before the breaker fires.
+budgets. The worker budget is smaller than the server one so the worker returns a clear
+timeout before the breaker fires.
 
-Still open, and documented as open: element *lookup* for `computer_invoke` and
-`computer_set_value` still walks the tree from PowerShell, because those calls need
-live COM objects for the patterns. Only the read-only traversal and
-`computer_element_at` moved to the native layer. The OCR fallback also captures the
-window through `PrintWindow`, which is a synchronous call into the target and
-carries the same risk.
+Element *lookup* for `computer_invoke` and `computer_set_value` still walks the tree
+from PowerShell, because those calls need live COM objects for the patterns. Only the
+read-only traversal and `computer_element_at` moved to the native layer. The OCR
+fallback also captures the window through `PrintWindow`, which is a synchronous call
+into the target and carries the same risk.
 
-That open item is not theoretical. Against Mod Organizer 2 on this machine,
-`computer_invoke` ran into the 8 s budget and the server answered with the reason
-instead of hanging forever:
+Against Mod Organizer 2 on this machine `computer_invoke` ran into the 8 s budget and
+came back with the reason instead of hanging:
 
 ```
 Error: UI Automation hung on 'invoke|modorganizer': no response in 8 s, worker restarted.
@@ -308,10 +293,8 @@ while every other window kept working.
 
 ## Games
 
-Aiming in a shooter is the one case where click and move is useless, and the reason
-is not a defect in the tool.
-
-Most shooters read mouse movement through raw input: the engine consumes only
+Aiming in a shooter does not work through click and move, and no amount of clicking
+fixes it. Most shooters read the mouse through raw input: the engine takes only
 hardware packets and ignores synthetic input, so buttons fire while the camera does
 not turn. Aim with relative movement instead of absolute positioning:
 
@@ -320,7 +303,7 @@ not turn. Aim with relative movement instead of absolute positioning:
 ```
 
 `steps` matters. Games apply sensitivity to every mouse event, so one 220 px jump
-reads as a flick and twenty small steps read as a hand. The tool measures how far
+looks like a flick and twenty small steps look like a hand. The tool measures how far
 the cursor actually went and tops up the remainder, because Windows coalesces
 injected motion.
 
@@ -394,9 +377,8 @@ the COM call open) and the breaker caught it. That is a property of somebody els
 application, not a defect, so it does not fail the run. A failure count above zero is
 a real break.
 
-The UIA circuit breaker is tested by booting a second server with a deliberately
-absurd 1 ms budget and checking that the first call hangs, the second is blocked, and
-both say why.
+The UIA circuit breaker is tested by booting a second server with a 1 ms budget and
+checking that the first call hangs, the second is blocked, and both say why.
 
 ## Windows gotchas
 
