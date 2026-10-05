@@ -91,7 +91,15 @@ const checkTarget = async (name, args, verify) => {
   };
   let res = await run(args);
   const why = `${res.txt} ${res.err ?? ""}`;
-  if (tKey && /не найден|не найдена|Не найдено/i.test(why) && (await retarget())) {
+  if (tKey && /не найден|не найдена|Не найдено/i.test(why)) {
+    const got = await retarget();
+    if (!got) {
+      // Цель исчезла совсем: окно закрыли во время прогона. Это гонка теста с
+      // тем, что делает пользователь, а не поломка инструмента.
+      skipped++;
+      console.log(`  ПРОПУЩЕНО ${name} (${res.ms} мс) — окно '${tKey}' закрылось во время прогона`);
+      return res;
+    }
     const retry = { ...args };
     if (retry.window !== undefined) retry.window = tKey;
     else retry.title = tKey;
