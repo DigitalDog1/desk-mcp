@@ -38,6 +38,13 @@ printwindow.png
 
 publish.ps1
 _t_*.txt
+_t_*.mjs
+_t_*.mp4
+_t_*.png
+_t_*.mp4
+_t_*.txt
+_t_*.mjs
+_t_*.mp4
 _g_*.txt
 _c_*
 _c-*.mjs
@@ -45,3 +52,5 @@ _s_*
 _n_*
 _e_real.mjs
 u_ref.ps1
+_d_*/
+*.tgz

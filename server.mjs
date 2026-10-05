@@ -285,7 +285,7 @@ const UI_TOOLS = new Set(["read_screen", "element_at", "find", "invoke", "set_va
 
 // --- сервер -------------------------------------------------------------------
 
-const server = new McpServer({ name: "desk-mcp", version: "1.3.0" });
+const server = new McpServer({ name: "desk-mcp", version: "1.4.0" });
 
 const ok = (data) => ({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
 

@@ -1,0 +1,37 @@
+{
+  "manifest_version": "0.3",
+  "name": "desk-mcp",
+  "display_name": "desk-mcp (Windows desktop)",
+  "version": "1.4.0",
+  "description": "Windows desktop automation MCP server: screenshots, OCR, mouse and keyboard input, and element trees from UI Automation, MSAA and Chrome DevTools Protocol. Zero external binaries.",
+  "long_description": "42 tools over a pure Node.js stdio server backed by the PowerShell that ships with Windows, so there is nothing to install and nothing to compile. Reads degrade in order: UI Automation, then MSAA through oleacc, then the Chrome DevTools Protocol for Chromium pages, then OCR. Every UI Automation call runs on an STA thread with a hard timeout, and a per-window circuit breaker blocks a key for 90 s after a hang, so one frozen application does not stall the agent. Actions go through UI Automation patterns, so the mouse does not have to move. Windows only.",
+  "author": {
+    "name": "DigitalDog1",
+    "url": "https://github.com/DigitalDog1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DigitalDog1/desk-mcp.git"
+  },
+  "homepage": "https://github.com/DigitalDog1/desk-mcp#readme",
+  "support": "https://github.com/DigitalDog1/desk-mcp/issues",
+  "server": {
+    "type": "node",
+    "entry_point": "server/server.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/server.mjs"],
+      "env": {}
+    }
+  },
+  "tools_generated": true,
+  "keywords": ["mcp", "windows", "automation", "ui-automation", "accessibility", "ocr", "desktop"],
+  "license": "Apache-2.0",
+  "compatibility": {
+    "platforms": ["win32"],
+    "runtimes": {
+      "node": ">=20"
+    }
+  },
+  "user_config": {}
+}
