@@ -299,6 +299,40 @@ public static class UiaNative
         return Run(timeoutMs, job);
     }
 
+    // Входы по готовому HWND. Окно уже найдено через user32 (EnumWindows),
+    // поэтому перебирать все окна средствами UIA не нужно.
+    public static UiaResult RunTreeByHwnd(int timeoutMs, long hwnd, int maxDepth,
+                                          int maxElements, bool interactiveOnly)
+    {
+        Func<object> job = delegate
+        {
+            return TreeJson("", hwnd, maxDepth, maxElements, interactiveOnly);
+        };
+        return Run(timeoutMs, job);
+    }
+
+    public static UiaResult RunSearchByHwnd(int timeoutMs, long hwnd, string nameLike,
+                                            string typeName, string automationId, int maxDepth, int limit)
+    {
+        Func<object> job = delegate
+        {
+            return SearchJson("", hwnd, nameLike, typeName, automationId, maxDepth, limit);
+        };
+        return Run(timeoutMs, job);
+    }
+
+    public static UiaResult RunResolveByHwnd(int timeoutMs, long hwnd, string nameLike,
+                                             string typeName, string automationId, int maxDepth,
+                                             int rectX, int rectY, int rectW, int rectH)
+    {
+        Func<object> job = delegate
+        {
+            return ResolveJson("", hwnd, nameLike, typeName, automationId, maxDepth,
+                               rectX, rectY, rectW, rectH);
+        };
+        return Run(timeoutMs, job);
+    }
+
     public static string StatsJson()
     {
         lock (Gate)
@@ -317,17 +351,58 @@ public static class UiaNative
         }
     }
 
+    // Список окон для обхода. При заданном hwnd берём только это окно через
+    // FromHandle, без обращения к AutomationElement.RootElement.
+    //
+    // Почему это отдельный путь, а не мелочь: на машине, где висит
+    // приложение, тормозящее UIA, ЛЮБОЕ касание RootElement стоит ~3 с
+    // (замерено: FindAll по детям 3034 мс, FindFirst по имени 3016 мс,
+    // FromHandle 40 мс, обход потомков из FromHandle 5 мс на 19 узлов).
+    // То есть перебор всех окон в поисках одного окна и есть тот налог,
+    // из-за которого named-вызов стоил 3 с вместо сотен миллисекунд.
+    private static List<AutomationElement> WindowList(string titleLike, long hwnd)
+    {
+        List<AutomationElement> list = new List<AutomationElement>();
+        if (hwnd != 0)
+        {
+            try { list.Add(AutomationElement.FromHandle(new IntPtr(hwnd))); }
+            catch (Exception) { }
+            return list;
+        }
+        AutomationElement root = AutomationElement.RootElement;
+        PropertyCondition cond = new PropertyCondition(
+            AutomationElement.ControlTypeProperty, ControlType.Window);
+        AutomationElementCollection wins = root.FindAll(TreeScope.Children, cond);
+        foreach (AutomationElement w in wins)
+        {
+            try
+            {
+                if (!IsWindowVisible(new IntPtr(w.Current.NativeWindowHandle))) continue;
+                if (!IsBlank(titleLike) && !Contains(w.Current.Name, titleLike)) continue;
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+            list.Add(w);
+        }
+        return list;
+    }
+
     public static string TreeJson(string titleLike, int maxDepth, int maxElements, bool interactiveOnly)
+    {
+        return TreeJson(titleLike, 0, maxDepth, maxElements, interactiveOnly);
+    }
+
+    public static string TreeJson(string titleLike, long hwnd, int maxDepth, int maxElements,
+                                  bool interactiveOnly)
     {
         try
         {
             List<string> trees = new List<string>();
             Counter last = new Counter();
 
-            AutomationElement root = AutomationElement.RootElement;
-            PropertyCondition cond = new PropertyCondition(
-                AutomationElement.ControlTypeProperty, ControlType.Window);
-            AutomationElementCollection wins = root.FindAll(TreeScope.Children, cond);
+            List<AutomationElement> wins = WindowList(titleLike, hwnd);
 
             foreach (AutomationElement w in wins)
             {
@@ -534,9 +609,15 @@ public static class UiaNative
     public static string SearchJson(string titleLike, string nameLike, string typeName,
                                     string automationId, int maxDepth, int limit)
     {
+        return SearchJson(titleLike, 0, nameLike, typeName, automationId, maxDepth, limit);
+    }
+
+    public static string SearchJson(string titleLike, long hwnd, string nameLike, string typeName,
+                                    string automationId, int maxDepth, int limit)
+    {
         try
         {
-            List<object[]> hits = SearchCore(titleLike, nameLike, typeName, automationId, maxDepth, limit);
+            List<object[]> hits = SearchCore(titleLike, hwnd, nameLike, typeName, automationId, maxDepth, limit);
             List<string> outItems = new List<string>();
             for (int i = 0; i < hits.Count; i++)
             {
@@ -554,12 +635,20 @@ public static class UiaNative
                                      string automationId, int maxDepth,
                                      int rectX, int rectY, int rectW, int rectH)
     {
+        return ResolveJson(titleLike, 0, nameLike, typeName, automationId, maxDepth,
+                           rectX, rectY, rectW, rectH);
+    }
+
+    public static string ResolveJson(string titleLike, long hwnd, string nameLike, string typeName,
+                                     string automationId, int maxDepth,
+                                     int rectX, int rectY, int rectW, int rectH)
+    {
         try
         {
-            List<object[]> hits = SearchCore(titleLike, nameLike, typeName, automationId, maxDepth, 1);
+            List<object[]> hits = SearchCore(titleLike, hwnd, nameLike, typeName, automationId, maxDepth, 1);
             if (hits.Count == 0 && rectW > 0 && rectH > 0)
             {
-                List<object[]> broad = SearchCore(titleLike, "", typeName, "", maxDepth, 200);
+                List<object[]> broad = SearchCore(titleLike, hwnd, "", typeName, "", maxDepth, 200);
                 int cx = rectX + (rectW / 2);
                 int cy = rectY + (rectH / 2);
                 hits = new List<object[]>();
@@ -608,12 +697,15 @@ public static class UiaNative
     private static List<object[]> SearchCore(string titleLike, string nameLike, string typeName,
                                              string automationId, int maxDepth, int limit)
     {
+        return SearchCore(titleLike, 0, nameLike, typeName, automationId, maxDepth, limit);
+    }
+
+    private static List<object[]> SearchCore(string titleLike, long hwnd, string nameLike, string typeName,
+                                             string automationId, int maxDepth, int limit)
+    {
         List<object[]> hits = new List<object[]>();
 
-        AutomationElement root = AutomationElement.RootElement;
-        PropertyCondition cond = new PropertyCondition(
-            AutomationElement.ControlTypeProperty, ControlType.Window);
-        AutomationElementCollection wins = root.FindAll(TreeScope.Children, cond);
+        List<AutomationElement> wins = WindowList(titleLike, hwnd);
 
         foreach (AutomationElement w in wins)
         {

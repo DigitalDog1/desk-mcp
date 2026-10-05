@@ -57,6 +57,57 @@ public class DeskMcp {
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
 
+    // Перечисление верхнеуровневых окон через user32, а не через UIA.
+    // Причина замерами: FindWindowByTitle шёл через
+    // AutomationElement.RootElement.FindAll, и когда в системе висит
+    // приложение, тормозящее UIA, любой вызов с названием окна платил
+    // 3.0-3.2 с. EnumWindows занимает микросекунды и не ходит в COM.
+    public delegate bool EnumWindowsProc(IntPtr h, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW")]
+    public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder sb, int max);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")]
+    public static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder sb, int max);
+
+    public class WinInfo {
+        public IntPtr Handle;
+        public string Title;
+        public string Class;
+        public int Pid;
+        public bool Visible;
+        public int X, Y, W, H;
+    }
+
+    public static System.Collections.Generic.List<WinInfo> EnumTopWindows() {
+        var list = new System.Collections.Generic.List<WinInfo>();
+        var sbT = new System.Text.StringBuilder(512);
+        var sbC = new System.Text.StringBuilder(256);
+        EnumWindows(delegate(IntPtr h, IntPtr l) {
+            sbT.Length = 0; sbC.Length = 0;
+            GetWindowTextW(h, sbT, sbT.Capacity);
+            GetClassNameW(h, sbC, sbC.Capacity);
+            var title = sbT.ToString();
+            // Отбрасываем окна без заголовка и без области: служебные
+            // оверлеи, тени и заглушки дают 0x0 или 14x14 и в выдаче
+            // computer_windows они только шумят (193 окна против 16 у UIA).
+            RECT rr;
+            bool hasRect = GetWindowRect(h, out rr);
+            int ww = hasRect ? rr.Right - rr.Left : 0;
+            int hh = hasRect ? rr.Bottom - rr.Top : 0;
+            if (title.Length > 0 && ww > 1 && hh > 1) {
+                int pid;
+                GetWindowThreadProcessIdPid(h, out pid);
+                list.Add(new WinInfo {
+                    Handle = h, Title = title, Class = sbC.ToString(),
+                    Pid = pid, Visible = IsWindowVisible(h),
+                    X = rr.Left, Y = rr.Top, W = ww, H = hh
+                });
+            }
+            return true;
+        }, IntPtr.Zero);
+        return list;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
     // PrintWindow с PW_RENDERFULLCONTENT (0x2) заставляет приложение
@@ -702,6 +753,11 @@ function Get-Vk([string]$name) {
 
 
 function Get-WindowList {
+    # Список остаётся на UIA намеренно: так в выдаче нет служебных окон
+    # (Task Host Window, BroadcastListenerWindow, UxdService и подобных),
+    # их видно через EnumWindows, и фильтровать пришлось бы руками.
+    # Этот вызов делают редко, а вот разрешение окна по заголовку идёт
+    # в Find-WindowByTitle, и там путь уже на user32.
     $result = @()
     $root = [System.Windows.Automation.AutomationElement]::RootElement
     $cond = New-Object System.Windows.Automation.PropertyCondition(
@@ -723,13 +779,22 @@ function Get-WindowList {
 }
 
 function Find-WindowByTitle([string]$like, [int]$timeoutSec) {
+    # Горячий путь: user32 вместо UIA. Замером ловилось, что при висящем в
+    # системе приложении, тормозящем UIA, каждый вызов с названием окна
+    # платил 3.0-3.2 с именно здесь. EnumWindows делает то же самое без COM.
     $deadline = (Get-Date).AddSeconds($timeoutSec)
+    $pat = "*$(Escape-Like $like)*"
     while ($true) {
-        $pat = "*$(Escape-Like $like)*"
-        $w = Get-WindowList | Where-Object { $_.title -like $pat -and $_.visible } | Select-Object -First 1
-        if ($w) {
-            $h = (Get-Process -Id $w.process -ErrorAction SilentlyContinue)
-            return $w
+        foreach ($w in [DeskMcp]::EnumTopWindows()) {
+            if ($w.Visible -and $w.Title -like $pat) {
+                return [ordered]@{
+                    title   = $w.Title
+                    process = $w.Pid
+                    class   = $w.Class
+                    rect    = [ordered]@{ x = $w.X; y = $w.Y; w = $w.W; h = $w.H }
+                    visible = $w.Visible
+                }
+            }
         }
         if ((Get-Date) -ge $deadline) { return $null }
         Start-Sleep -Milliseconds 250
@@ -927,10 +992,13 @@ function Search-UiElements {
         } catch { continue }
         $counter = 0
         $stack = New-Object System.Collections.Stack
-        $stack.Push(@($w, 0))
+        $seed = New-Object object[] 2
+        $seed[0] = $w
+        $seed[1] = 0
+        $stack.Push($seed)
         while ($stack.Count -gt 0 -and $hits.Count -lt $Limit) {
             $top = $stack.Pop()
-            $el = $top[0]; $depth = $top[1]
+            $el = $top[0]; $depth = [int]$top[1]
             if ($depth -gt $MaxDepth) { continue }
             $counter++
             if ($counter -gt 4000) { break }
@@ -944,7 +1012,15 @@ function Search-UiElements {
                 $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
                 $ch = $walker.GetFirstChild($el)
                 while ($ch -ne $null) {
-                    $stack.Push(@($ch, $depth + 1))
+                    # Пара элемент+глубина собирается через object[] намеренно:
+                    # написанная как @($ch, $depth + 1) пара разбирается
+                    # PowerShell как ($ch, $depth) + 1 и даёт массив из трёх
+                    # элементов, из-за чего глубина всегда была 0 и maxDepth
+                    # не ограничивал обход ни разу.
+                    $pair = New-Object object[] 2
+                    $pair[0] = $ch
+                    $pair[1] = $depth + 1
+                    $stack.Push($pair)
                     $ch = $walker.GetNextSibling($ch)
                 }
             } catch { }
@@ -1058,10 +1134,30 @@ function Count-NamedUiInside($windows) {
     return $n
 }
 
+function Find-WindowHwnd([string]$title) {
+    # HWND верхнеуровневого окна по подстроке заголовка, через user32.
+    # 0, если не нашлось. Нужен, чтобы не заставлять нативный слой искать
+    # окно перебором RootElement: замерено, что касание RootElement стоит
+    # ~3 с, пока FromHandle с обходом потомков это 5 мс.
+    if ($title -eq '') { return [long]0 }
+    foreach ($w in [DeskMcp]::EnumTopWindows()) {
+        if ($w.Visible -and $w.Title.ToLowerInvariant().Contains($title.ToLowerInvariant())) {
+            return [long]$w.Handle.ToInt64()
+        }
+    }
+    return [long]0
+}
+
 function Get-UiTree([string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly) {
+    $hwnd = Find-WindowHwnd $titleLike
     if ($script:NativeUia) {
-        $argv = @([int]$script:UiaBudgetMs, [string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly)
-        $json = Invoke-UiaNative 'RunTree' $argv
+        if ($hwnd -ne 0) {
+            $argv = @([int]$script:UiaBudgetMs, $hwnd, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly)
+            $json = Invoke-UiaNative 'RunTreeByHwnd' $argv
+        } else {
+            $argv = @([int]$script:UiaBudgetMs, [string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly)
+            $json = Invoke-UiaNative 'RunTree' $argv
+        }
         $o = $json | ConvertFrom-Json
         return [ordered]@{ windows = @($o.windows); elementsScanned = [int]$o.elementsScanned }
     }
@@ -1516,17 +1612,33 @@ function Invoke-Tool {
                     break
                 }
 
-                $uia = Get-UiTree $title $md $me $io
-                if ($backend -eq 'uia' -or (Count-NamedUiInside $uia.windows) -ge 5) {
-                    $uia['backend'] = 'uia'
-                    $result = $uia
-                    break
+                # Окно ищем сразу и быстро через user32. Перебор окон
+                # средствами UIA на этой машине стоит ~3 с, и раньше «окна нет»
+                # уводило в два бесполезных обхода и в отказ по бюджету вместо
+                # деградации. Окна нет — значит UIA и MSAA смотреть нечего,
+                # сразу идём к пикселям.
+                $windowMissing = $false
+                if ($title -ne '') {
+                    $found = Find-WindowByTitle $title 3
+                    if (-not $found) { $windowMissing = $true }
                 }
-                $msaa = Get-MsaaTree $title $md $me $io
-                $depth = $md
-                while ($script:MsaaUseful -lt 3 -and $depth -lt 30) {
-                    $depth = $depth * 2
-                    $msaa = Get-MsaaTree $title $depth $me $io
+
+                if (-not $windowMissing) {
+                    $uia = Get-UiTree $title $md $me $io
+                    if ($backend -eq 'uia' -or (Count-NamedUiInside $uia.windows) -ge 5) {
+                        $uia['backend'] = 'uia'
+                        $result = $uia
+                        break
+                    }
+                    $msaa = Get-MsaaTree $title $md $me $io
+                    $depth = $md
+                    while ($script:MsaaUseful -lt 3 -and $depth -lt 30) {
+                        $depth = $depth * 2
+                        $msaa = Get-MsaaTree $title $depth $me $io
+                    }
+                } else {
+                    $msaa = @()
+                    $depth = $md
                 }
                 if (@($msaa).Count -gt 0 -and $script:MsaaUseful -gt 0) {
                     $result = [ordered]@{
