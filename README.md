@@ -134,6 +134,20 @@ translated names (`Close`, `Maximize`, `Minimize` in Russian on a Russian instal
 Prefer `automationId` over caption text, or the agent will break on the user's
 locale.
 
+## The same window with the cursor
+
+![the same window driven by coordinates: the cursor walks, and a WinForms button ignores an instant click](docs/demo-cursor.gif)
+
+<p align="center"><sub>Same window, same visible result, other mechanism. <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo-cursor.mp4">MP4</a> or <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo-cursor.webm">WebM</a> for the full size version.</sub></p>
+
+Plain `computer_click` on coordinates, so the cursor walks and the app cannot tell
+the difference. The clip also shows a Windows trap worth knowing before you blame
+yourself: **a WinForms button ignores a synthetic click that arrives instantly.**
+`nudge` does not help it, `hoverFirst: true` does (250 ms over the control before
+the press). Measured on the same coordinates and the same window: without the hover
+the click did nothing, with it the event landed. For unknown applications, treat
+`hoverFirst: true` as the default for a pixel click.
+
 ## What it costs, measured
 
 Windows that were open on the machine while this was measured. Text tokens are
@@ -323,6 +337,17 @@ Nudge by a pixel:
 ```json
 { "tool": "computer_click", "args": { "x": 800, "y": 400, "nudge": 1 } }
 ```
+
+A WinForms button has the opposite requirement: it wants the cursor to arrive
+*before* the press, so use `hoverFirst`, not `nudge`.
+
+```json
+{ "tool": "computer_click", "args": { "x": 590, "y": 189, "hoverFirst": true } }
+```
+
+Measured on one window with one set of coordinates: `nudge: 1` left the counter at
+0, `hoverFirst: true` moved it to 1. Both calls returned `ok: true`, because
+nothing went wrong at the input level, the button just dropped the click.
 
 If your coordinates came from a downscaled screenshot, pass the same scale instead of
 doing the arithmetic:
