@@ -39,11 +39,13 @@ printwindow.png
 publish.ps1
 _t_*.txt
 _t_*.mjs
+_t_*.html
 _t_*.mp4
 _t_*.png
 _t_*.mp4
 _t_*.txt
 _t_*.mjs
+_t_*.html
 _t_*.mp4
 _g_*.txt
 _c_*
