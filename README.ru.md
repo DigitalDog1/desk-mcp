@@ -17,7 +17,13 @@
 встроенный в Windows PowerShell: без Python, без `uvx`, без компилятора, без
 нативных модулей.
 
-<video src="docs/demo.webm" poster="docs/demo-poster.png" width="820" autoplay loop muted playsinline></video>
+<p align="center">
+  <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.webm">
+    <img src="docs/demo-poster.png" width="820" alt="демо desk-mcp: пять действий через паттерны UI Automation в окне WinForms, без пиксельных кликов, курсор не двигается">
+  </a>
+  <br>
+  <sub>24 секунды, без звука. <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.webm">Открыть WebM</a>, если браузер не проигрывает его здесь.</sub>
+</p>
 
 На видео обычное WinForms-приложение (`examples/demo-app.ps1`). Пять действий, ноль
 пиксельных кликов, и **курсор не двигается ни разу**: все 24 секунды он лежит в

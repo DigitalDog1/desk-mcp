@@ -16,7 +16,13 @@ Windows desktop control for MCP agents. Accessibility trees first, pixels only w
 there is nothing else, input through WinAPI. Node.js plus the PowerShell that ships
 with Windows: no Python, no `uvx`, no compiler, no native modules.
 
-<video src="docs/demo.webm" poster="docs/demo-poster.png" width="820" autoplay loop muted playsinline></video>
+<p align="center">
+  <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.webm">
+    <img src="docs/demo-poster.png" width="820" alt="desk-mcp demo: five UI Automation pattern actions on a WinForms window, no pixel clicks, the cursor never moves">
+  </a>
+  <br>
+  <sub>24 seconds, muted. <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.webm">Open the WebM</a> if your browser will not play it here.</sub>
+</p>
 
 The window above is a plain WinForms app (`examples/demo-app.ps1`). Five actions, zero
 pixel clicks, and **the cursor does not move once**: it sits in the log box for the
