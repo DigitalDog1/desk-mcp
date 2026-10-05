@@ -492,6 +492,12 @@ server.registerTool(
       maxDepth: z.number().int().min(1).max(30).optional().default(6),
       maxElements: z.number().int().min(1).max(3000).optional().default(300),
       interactiveOnly: z.boolean().optional().default(false),
+      compact: z.boolean().optional().default(false)
+        .describe("узлы позиционными массивами вместо объектов: экономит больше половины " +
+                  "символов на том же дереве. Легенда полей приходит один раз в fields"),
+      maxChars: z.number().int().min(0).max(200000).optional().default(0)
+        .describe("бюджет символов ответа, 0 = без ограничения. При обрезании в ответе " +
+                  "появится truncated и подсказка перейти на computer_find"),
       backend: z.enum(["auto", "uia", "msaa"]).optional().default("auto")
         .describe("auto пробует UIA и при пустом дереве откатывается на MSAA. " +
                   "UIA не работает для Discord/Chrome/VSCode, пока они не запущены с --force-renderer-accessibility"),

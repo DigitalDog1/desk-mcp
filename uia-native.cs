@@ -249,6 +249,19 @@ public static class UiaNative
         return Run(timeoutMs, job);
     }
 
+    // Имена с суффиксом Compact, а не перегрузки RunTree: вызов идёт через
+    // рефлексию по имени (GetMethod), и две перегрузки дают AmbiguousMatchException.
+    public static UiaResult RunTreeCompact(int timeoutMs, string titleLike, int maxDepth,
+                                    int maxElements, bool interactiveOnly, bool compact,
+                                    int maxChars)
+    {
+        Func<object> job = delegate
+        {
+            return TreeJson(titleLike, 0, maxDepth, maxElements, interactiveOnly, compact, maxChars);
+        };
+        return Run(timeoutMs, job);
+    }
+
     public static UiaResult RunSearch(int timeoutMs, string titleLike, string nameLike,
                                       string typeName, string automationId, int maxDepth, int limit)
     {
@@ -307,6 +320,17 @@ public static class UiaNative
         Func<object> job = delegate
         {
             return TreeJson("", hwnd, maxDepth, maxElements, interactiveOnly);
+        };
+        return Run(timeoutMs, job);
+    }
+
+    public static UiaResult RunTreeByHwndCompact(int timeoutMs, long hwnd, int maxDepth,
+                                          int maxElements, bool interactiveOnly, bool compact,
+                                          int maxChars)
+    {
+        Func<object> job = delegate
+        {
+            return TreeJson("", hwnd, maxDepth, maxElements, interactiveOnly, compact, maxChars);
         };
         return Run(timeoutMs, job);
     }
@@ -397,10 +421,22 @@ public static class UiaNative
     public static string TreeJson(string titleLike, long hwnd, int maxDepth, int maxElements,
                                   bool interactiveOnly)
     {
+        return TreeJson(titleLike, hwnd, maxDepth, maxElements, interactiveOnly, false, 0);
+    }
+
+    // compact: узлы позиционными массивами вместо объектов с именами полей.
+    // maxChars: бюджет символов ответа, 0 = без ограничения. При обрезании
+    // в ответе ставится truncated, чтобы вызывающий не принял короткий ответ
+    // за полный.
+    public static string TreeJson(string titleLike, long hwnd, int maxDepth, int maxElements,
+                                  bool interactiveOnly, bool compact, int maxChars)
+    {
         try
         {
             List<string> trees = new List<string>();
             Counter last = new Counter();
+            CharBudget budget = new CharBudget();
+            budget.Max = maxChars;
 
             List<AutomationElement> wins = WindowList(titleLike, hwnd);
 
@@ -417,12 +453,38 @@ public static class UiaNative
                 }
 
                 Counter c = new Counter();
-                List<string> node = BuildNodes(w, 0, maxDepth, c, maxElements, interactiveOnly);
+                List<string> node = compact
+                    ? BuildNodesCompact(w, 0, maxDepth, c, maxElements, interactiveOnly, budget)
+                    : BuildNodes(w, 0, maxDepth, c, maxElements, interactiveOnly);
+                if (!compact)
+                {
+                    for (int i = 0; i < node.Count; i++)
+                        budget.Spent(node[i].Length);
+                }
                 for (int i = 0; i < node.Count; i++) trees.Add(node[i]);
                 last = c;
+                if (budget.Hit) break;
             }
 
-            return "{\"windows\":" + JoinArray(trees) + ",\"elementsScanned\":" + Count(last.Value) + "}";
+            StringBuilder head = new StringBuilder(64);
+            if (compact)
+            {
+                head.Append("{\"fields\":[\"name\",\"type\",\"automationId\",\"rect[x,y,w,h]\",");
+                head.Append("\"flags 1=enabled 2=offscreen 4=selected 8=toggled\",\"patterns\",");
+                head.Append("\"value (only ValuePattern)\",\"text (only TextPattern)\",\"children\"],\"windows\":");
+            }
+            else
+            {
+                head.Append("{\"windows\":");
+            }
+            head.Append(JoinArray(trees));
+            head.Append(",\"elementsScanned\":").Append(Count(last.Value));
+            if (budget.Hit)
+            {
+                head.Append(",\"truncated\":true,\"maxChars\":").Append(Count(maxChars));
+            }
+            head.Append('}');
+            return head.ToString();
         }
         catch (Exception ex)
         {
@@ -575,6 +637,189 @@ public static class UiaNative
         return one;
     }
 
+    // Компактная форма дерева. Узел отдаётся позиционным массивом вместо объекта
+// с именованными полями: на том же окне это экономит больше половины символов,
+    // потому что имена ключей повторяются на каждом узле.
+    // Легенда полей отдаётся один раз в ответе, поэтому её не нужно знать
+    // наизусть:
+    //   0 name, 1 type, 2 automationId, 3 [x,y,w,h], 4 flags,
+    //   5 patterns, 6 value (только у ValuePattern), 7 text (только у TextPattern),
+    //   8 children
+    // flags: бит 1 включён, 2 за экраном, 4 выделен, 8 переключатель во включённом.
+    // Обход здесь намеренно повторяет BuildNodes: правка существующего билдера
+    // заддела бы путь по умолчанию, а выигрыш нужен только в новой ветке.
+    private sealed class CharBudget
+    {
+        public int Chars = 0;
+        public int Max = 0;      // 0 = без ограничения
+        public bool Hit = false;
+
+        public bool Spent(int add)
+        {
+            Chars += add;
+            if (Max > 0 && Chars >= Max) { Hit = true; return true; }
+            return false;
+        }
+
+        public int Left
+        {
+            get { return Max <= 0 ? int.MaxValue : Max - Chars; }
+        }
+    }
+
+    private static List<string> BuildNodesCompact(AutomationElement el, int depth, int maxDepth,
+                                                 Counter c, int maxElements, bool interactiveOnly,
+                                                 CharBudget budget)
+    {
+        if (depth > maxDepth) return new List<string>();
+        if (c.Value >= maxElements) return new List<string>();
+        if (budget.Hit) return new List<string>();
+
+        AutomationElement.AutomationElementInformation info;
+        try
+        {
+            info = el.Current;
+        }
+        catch (Exception)
+        {
+            return new List<string>();
+        }
+
+        string ct = TypeShort(info.ControlType);
+        c.Value++;
+
+        string rawName = "";
+        try
+        {
+            rawName = info.Name;
+            if (rawName == null) rawName = "";
+        }
+        catch (Exception)
+        {
+            rawName = "";
+        }
+
+        bool include = !interactiveOnly || depth == 0 || InteractiveTypes.Contains(ct);
+
+        List<string> kids = new List<string>();
+
+        if (depth < maxDepth)
+        {
+            try
+            {
+                TreeWalker walker = Walker();
+                AutomationElement child = walker.GetFirstChild(el);
+                while (child != null && c.Value < maxElements && !budget.Hit)
+                {
+                    List<string> sub = BuildNodesCompact(child, depth + 1, maxDepth, c,
+                                                         maxElements, interactiveOnly, budget);
+                    for (int i = 0; i < sub.Count; i++) kids.Add(sub[i]);
+                    try
+                    {
+                        child = walker.GetNextSibling(child);
+                    }
+                    catch (Exception)
+                    {
+                        break;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        if (!include) return kids;
+
+        Rect rc = SafeRect(el);
+
+        // Все флаги собираются до записи узла: иначе переключатель и
+        // выделение вычислялись бы уже после того, как флаг вписан в JSON.
+        int flags = 0;
+        try { if (info.IsEnabled) flags |= 1; } catch (Exception) { }
+        try { if (info.IsOffscreen) flags |= 2; } catch (Exception) { }
+
+        List<string> pats = new List<string>();
+        string patJson = PatternsArray(el, pats);
+
+        if (Has(pats, "TogglePattern"))
+        {
+            try
+            {
+                TogglePattern tp = el.GetCurrentPattern(TogglePattern.Pattern) as TogglePattern;
+                if (tp != null && tp.Current.ToggleState.ToString() == "On") flags |= 8;
+            }
+            catch (Exception) { }
+        }
+
+        if (Has(pats, "SelectionItemPattern"))
+        {
+            try
+            {
+                SelectionItemPattern sp = el.GetCurrentPattern(SelectionItemPattern.Pattern) as SelectionItemPattern;
+                if (sp != null && sp.Current.IsSelected) flags |= 4;
+            }
+            catch (Exception) { }
+        }
+
+        StringBuilder b = new StringBuilder(160);
+        b.Append('[');
+        b.Append(J(Trunc(rawName, 200))).Append(',');
+        b.Append(J(ct)).Append(',');
+
+        string aid = null;
+        try { aid = info.AutomationId; } catch (Exception) { aid = null; }
+        b.Append(J(aid)).Append(',');
+        b.Append('[').Append(Coord(rc.X)).Append(',').Append(Coord(rc.Y)).Append(',')
+         .Append(Coord(rc.Width)).Append(',').Append(Coord(rc.Height)).Append(']').Append(',');
+        b.Append(flags).Append(',');
+        b.Append(patJson.Length > 0 ? patJson : "[]");
+
+        if (Has(pats, "ValuePattern"))
+        {
+            try
+            {
+                ValuePattern vp = el.GetCurrentPattern(ValuePattern.Pattern) as ValuePattern;
+                if (vp != null) b.Append(',').Append(J(Trunc(vp.Current.Value, 300)));
+            }
+            catch (Exception) { }
+        }
+
+        if (Has(pats, "TextPattern"))
+        {
+            try
+            {
+                TextPattern tp = el.GetCurrentPattern(TextPattern.Pattern) as TextPattern;
+                if (tp != null)
+                {
+                    TextPatternRange doc = tp.DocumentRange;
+                    string full = doc.GetText(-1);
+                    if (full == null) full = "";
+                    b.Append(',').Append(J(Trunc(full, 300)));
+                }
+            }
+            catch (Exception) { }
+        }
+
+        if (kids.Count > 0)
+        {
+            b.Append(",[");
+            for (int i = 0; i < kids.Count; i++)
+            {
+                if (i > 0) b.Append(',');
+                b.Append(kids[i]);
+            }
+            b.Append(']');
+        }
+        b.Append(']');
+
+        string json = b.ToString();
+        budget.Spent(json.Length);
+        List<string> one = new List<string>();
+        one.Add(json);
+        return one;
+    }
+
     private static void AppendPatterns(StringBuilder b, AutomationElement el,
                                        List<string> names, bool always)
     {
@@ -606,7 +851,28 @@ public static class UiaNative
         b.Append(",\"patterns\":").Append(arr.ToString());
     }
 
-    public static string SearchJson(string titleLike, string nameLike, string typeName,
+    // Только сам массив паттернов, без обёртки "patterns":. Нужно компактному
+    // билдеру: AppendPatterns пишет именованный ключ, а в позиционном массиве
+    // такой ключ ломает JSON.
+    private static string PatternsArray(AutomationElement el, List<string> names)
+    {
+        AutomationPattern[] ps = null;
+        try { ps = el.GetSupportedPatterns(); } catch (Exception) { ps = null; }
+        if (ps == null) return "";
+        for (int i = 0; i < ps.Length; i++) names.Add(PatternShort(ps[i]));
+        if (names.Count == 0) return "";
+        StringBuilder a = new StringBuilder(64);
+        a.Append('[');
+        for (int i = 0; i < names.Count; i++)
+        {
+            if (i > 0) a.Append(',');
+            a.Append(J(names[i]));
+        }
+        a.Append(']');
+        return a.ToString();
+    }
+
+    private static string SearchJson(string titleLike, string nameLike, string typeName,
                                     string automationId, int maxDepth, int limit)
     {
         return SearchJson(titleLike, 0, nameLike, typeName, automationId, maxDepth, limit);

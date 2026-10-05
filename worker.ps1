@@ -1148,10 +1148,23 @@ function Find-WindowHwnd([string]$title) {
     return [long]0
 }
 
-function Get-UiTree([string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly) {
+function Get-UiTree([string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly,
+                     [bool]$compact = $false, [int]$maxChars = 0) {
     $hwnd = Find-WindowHwnd $titleLike
     if ($script:NativeUia) {
-        if ($hwnd -ne 0) {
+        if ($compact -or $maxChars -gt 0) {
+            # Отдельное имя метода, а не перегрузка: Invoke-UiaNative ищет метод
+            # по имени через рефлексию, и перегрузка даёт неоднозначность.
+            if ($hwnd -ne 0) {
+                $argv = @([int]$script:UiaBudgetMs, $hwnd, [int]$maxDepth, [int]$maxElements,
+                          [bool]$interactiveOnly, [bool]$compact, [int]$maxChars)
+                $json = Invoke-UiaNative 'RunTreeByHwndCompact' $argv
+            } else {
+                $argv = @([int]$script:UiaBudgetMs, [string]$titleLike, [int]$maxDepth, [int]$maxElements,
+                          [bool]$interactiveOnly, [bool]$compact, [int]$maxChars)
+                $json = Invoke-UiaNative 'RunTreeCompact' $argv
+            }
+        } elseif ($hwnd -ne 0) {
             $argv = @([int]$script:UiaBudgetMs, $hwnd, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly)
             $json = Invoke-UiaNative 'RunTreeByHwnd' $argv
         } else {
@@ -1159,7 +1172,14 @@ function Get-UiTree([string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool
             $json = Invoke-UiaNative 'RunTree' $argv
         }
         $o = $json | ConvertFrom-Json
-        return [ordered]@{ windows = @($o.windows); elementsScanned = [int]$o.elementsScanned }
+        $res = [ordered]@{ windows = @($o.windows); elementsScanned = [int]$o.elementsScanned }
+        if ($o.fields) { $res['fields'] = @($o.fields) }
+        if ($o.truncated) {
+            $res['truncated'] = $true
+            $res['maxChars'] = [int]$o.maxChars
+            $res['note'] = "Дерево обрезано по maxChars. Для точечного доступа зови computer_find по имени или automationId."
+        }
+        return $res
     }
     $root = [System.Windows.Automation.AutomationElement]::RootElement
     $cond = New-Object System.Windows.Automation.PropertyCondition(
@@ -1624,8 +1644,15 @@ function Invoke-Tool {
                 }
 
                 if (-not $windowMissing) {
-                    $uia = Get-UiTree $title $md $me $io
-                    if ($backend -eq 'uia' -or (Count-NamedUiInside $uia.windows) -ge 5) {
+                    $compact = [bool]$a.compact
+                    $maxChars = if ($a.maxChars) { [int]$a.maxChars } else { 0 }
+                    $uia = Get-UiTree $title $md $me $io $compact $maxChars
+                    # В компактном виде узлы это массивы, поля name у них нет,
+                    # поэтому критерий "дерево содержательное" считаем по
+                    # числу просмотренных элементов, а не по именам.
+                    $uiaUseful = if ($compact) { [int]$uia.elementsScanned -ge 5 }
+                                 else { (Count-NamedUiInside $uia.windows) -ge 5 }
+                    if ($backend -eq 'uia' -or $uiaUseful) {
                         $uia['backend'] = 'uia'
                         $result = $uia
                         break
