@@ -142,31 +142,35 @@ to `hoverFirst: true` for pixel clicks into an app you have not tried yet.
 ## What it costs, measured
 
 Text tokens are `chars / 4`, image tokens follow Anthropic's `width * height / 750`.
-These four windows were open on the machine at the time.
+Measured with a Chromium game running on the machine, which is the worst case for
+anything that touches UI Automation.
 
-| Window | Size | One element (`computer_find`) | Whole tree (`computer_read_screen`) | Picture (`computer_screenshot`) |
-| --- | ---: | ---: | ---: | ---: |
-| Parcel Tracker (WinForms) | 940x640 | 83 tokens, 232 ms | 4421 tokens, 285 ms | 803 tokens, 175 ms |
-| Discord (Chromium) | 1793x922 | 15 tokens, 24 ms | 18765 tokens, 597 ms | 2205 tokens, 109 ms |
-| Snipping Tool | 1198x1400 | 83 tokens, 16 ms | 4184 tokens, 94 ms | 2237 tokens, 80 ms |
-| MiniMax Code (Chromium) | 2576x1416 | 160 tokens, 92 ms | 471 tokens, 132 ms | 4864 tokens, 153 ms |
+| Window | Size | One element (`computer_find`) | Whole tree | Compact tree | Picture |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| MiniMax Code | 2576x1416 | 93 tokens, 3159 ms | 471 tokens, 3223 ms | 1313 tokens, 42 ms | 4864 tokens, 139 ms |
+| Discord | 1793x922 | 15 tokens, 4362 ms | 60 tokens, 8005 ms | 67 tokens, 1 ms | 2205 tokens, 149 ms |
+| This page in Edge | 2576x1416 | 97 tokens, 3055 ms | 3232 tokens, 107 ms | 2490 tokens, 46 ms | 4864 tokens, 102 ms |
+| Snipping Tool | 617x343 | 84 tokens, 3061 ms | 4189 tokens, 73 ms | 2969 tokens, 15 ms | 283 tokens, 31 ms |
+| Microsoft Store | 1216x941 | 82 tokens, 3070 ms | 5859 tokens, 80 ms | 4353 tokens, 48 ms | 1526 tokens, 96 ms |
 
-- Looking up one element costs 9x to 147x less than a picture of the same window, and
-  it returns exact bounds and patterns.
-- The whole tree can cost more than the screenshot: 8.5x more on Discord, where a
-  message list is a lot of nodes. `maxDepth`, `maxElements` and `interactiveOnly`
-  pull it back (`interactiveOnly` alone took Discord's tree from 18765 to 1280
-  tokens), or query the one element you need.
+- Looking up one element costs 3.4x to 147x less than a picture of the same window,
+  and it returns exact bounds and patterns.
+- A whole tree can cost more than the screenshot. `maxDepth`, `maxElements`,
+  `interactiveOnly`, `compact` and `maxChars` pull it back. On one window with a long
+  message list the tree came to 29643 tokens, and `interactiveOnly` alone took that
+  to 1280.
+- `compact` swaps named fields for positional arrays, which saves 23% to 29% on the
+  big trees above. On a small tree it **loses**: the `fields` legend is a fixed
+  overhead, and on the 471-token tree it turned the answer into 1313 tokens. Turn it on
+  for a big tree, off for a small one.
 - A screenshot costs the same every time, since only window size matters. A big window
   is expensive however empty it is.
-- All three paths ran between 16 ms and 600 ms here. A call that names a window pays
-  for UI Automation before it does anything else, so if some other application stalls
-  UIA that cost lands on every window, not just the guilty one. Measured with a
-  Chromium game running: every titled call went from ~250 ms to ~3.1 s
-  (`computer_find` on Discord, on Edge, on a console window and on this repository's
-  own window all landed at 3.0-3.2 s), while calls that do not resolve a window stayed
-  fast (`computer_clipboard_get` 1-6 ms, region screenshot 63 ms). The per-window
-  breaker cannot catch that, because no single window is at fault.
+- Reading a window now costs 15 to 525 ms: the window is resolved through `user32`
+  and the traversal starts from that handle. Two rows above are the exceptions, both
+  for the same reason: Discord's tree hits the 8 s budget because Chromium drags on
+  UIA, and MiniMax Code's first read pays that same way.
+- `computer_find` is still 3.0 to 4.4 s. It needs live COM objects to apply the
+  patterns, so it still runs on the PowerShell thread. That one is next on the list.
 
 Run `npm run bench` to measure your own windows.
 

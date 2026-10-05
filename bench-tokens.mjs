@@ -95,6 +95,19 @@ for (const w of targets.slice(0, 6)) {
     row.leanMs = Date.now() - t0;
   } catch (e) { row.leanMs = -1; }
 
+  // 2b. То же в компактной форме: узлы позиционными массивами.
+  t0 = Date.now();
+  try {
+    const r = await client.callTool({
+      name: "computer_read_screen",
+      arguments: { title: w.title, maxDepth: 6, maxElements: 300, compact: true },
+    });
+    const s = textOf(r);
+    row.compactChars = s.length;
+    row.compactTokens = tokensText(s);
+    row.compactMs = Date.now() - t0;
+  } catch (e) { row.compactMs = -1; }
+
   // 3. Поиск одного элемента. Это и есть рабочий режим агента: окно
   // целиком читать не нужно, нужен один элемент по имени и роли.
   t0 = Date.now();
@@ -162,6 +175,15 @@ const bodyLean = rows.map((r) =>
       : `${(r.findTokens / r.pngTokensA).toFixed(1)}x MORE expensive`)
     : "-") + " |");
 
+const headCompact = "| Window | Full tree tokens | Compact tokens | Compact ms | Compact saving |";
+const bodyCompact = rows.map((r) =>
+  `| ${r.title} | ${r.treeTokens ?? "-"} | ${r.compactTokens ?? "-"} | ${r.compactMs ?? "-"} | ` +
+  (r.compactTokens && r.treeTokens
+    ? (r.compactTokens < r.treeTokens
+      ? `-${(100 - (r.compactTokens / r.treeTokens) * 100).toFixed(0)}%`
+      : `+${(((r.compactTokens / r.treeTokens) * 100) - 100).toFixed(0)}%`)
+    : "-") + " |");
+
 console.log(`\nСнимок окна взят попиксельно: ${rows[0]?.shotW ?? "?"}x${rows[0]?.shotH ?? "?"} (${rows[0]?.dimFrom ?? "?"})\n`);
 console.log("### Полное дерево против скриншота\n");
 console.log(head);
@@ -171,6 +193,10 @@ console.log("\n### Экономный режим: maxDepth 4, maxElements 120, i
 console.log(headLean);
 console.log("| --- | ---: | ---: | ---: | --- | --- |");
 console.log(bodyLean.join("\n"));
+console.log("\n### Компактная форма дерева: те же узлы, узлы массивами\n");
+console.log(headCompact);
+console.log("| --- | ---: | ---: | ---: | ---: |");
+console.log(bodyCompact.join("\n"));
 console.log("\nТокены картинки: Anthropic w*h/750, OpenAI high 85+170*tiles of 512x512. Текст ~ chars/4.");
 console.log("Размер снимка взят из геометрии окна, это граница +/- бордюр. Замеры на этой машине, окна живые.\n");
 
