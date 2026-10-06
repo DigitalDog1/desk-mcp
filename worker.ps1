@@ -1183,9 +1183,14 @@ function Get-UiCached([string]$key, [scriptblock]$make) {
 }
 
 function Get-ElementInfosCached {
-    param([string]$Title, [string]$Name, [string]$Type, [string]$Id, [int]$MaxDepth, [int]$Limit)
-    $key = "ei|$Title|$Name|$Type|$Id|$MaxDepth|$Limit"
+    param([string]$Title, [string]$Name, [string]$Type, [string]$Id, [int]$MaxDepth, [int]$Limit, [long]$Hwnd = 0)
+    $key = "ei|$Title|$Hwnd|$Name|$Type|$Id|$MaxDepth|$Limit"
     return Get-UiCached $key {
+        $a = @{ title = $Title; hwnd = $Hwnd; name = $Name; type = $Type; id = $Id }
+        $nat = Invoke-UiAct 'find' $a $MaxDepth $Limit
+        if ($nat -and $nat.status -eq 'ok' -and $nat.elements) {
+            return , @($nat.elements)
+        }
         $hits = Search-UiElements $Title $Name $Type $Id $MaxDepth $Limit
         $items = @()
         foreach ($h in $hits) { $items += ,(Convert-ElementInfo $h) }
@@ -2722,23 +2727,26 @@ function Invoke-Tool {
                             # в агентном цикле вызывается после find и не
                             # требует живого элемента, а обход дерева стоит
                             # сотни миллисекунд каждый раз.
-                            $infos = Get-ElementInfosCached ([string]$a.title) ([string]$lab) ([string]$role) '' 8 5
+                            $targetHwnd = if ($a.hwnd) { [long]$a.hwnd } else { 0 }
+                            $infos = Get-ElementInfosCached ([string]$a.title) ([string]$lab) ([string]$role) '' 8 5 $targetHwnd
                             $n = @($infos).Count
                             if ($n -eq 0) { $state = 'unsatisfied'; $detail = 'не найден' }
                             else {
                                 $info = @($infos)[0]
                                 $detail = "найдено $n"
                                 if ((Has-Prop $chk 'value_equals')) {
-                                    $v = $info['value']
+                                    $v = Get-UiProp $info 'value'
                                     if ($null -eq $v) { $state = 'unknown'; $detail += ', значение недоступно' }
                                     elseif ($v -eq $chk.value_equals) { $state = 'satisfied' }
                                     else { $state = 'unsatisfied'; $detail += ", значение='$v'" }
                                 } elseif ((Has-Prop $chk 'enabled')) {
-                                    $state = $(if ([bool]$info['enabled'] -eq [bool]$chk.enabled) { 'satisfied' } else { 'unsatisfied' })
-                                    $detail += ", enabled=$($info['enabled'])"
+                                    $en = Get-UiProp $info 'enabled'
+                                    $state = $(if ([bool]$en -eq [bool]$chk.enabled) { 'satisfied' } else { 'unsatisfied' })
+                                    $detail += ", enabled=$en"
                                 } elseif ((Has-Prop $chk 'selected')) {
-                                    if ($null -eq $info['selected']) { $state = 'unknown'; $detail += ', selected недоступно' }
-                                    else { $state = $(if ([bool]$info['selected'] -eq [bool]$chk.selected) { 'satisfied' } else { 'unsatisfied' }) }
+                                    $sel = Get-UiProp $info 'selected'
+                                    if ($null -eq $sel) { $state = 'unknown'; $detail += ', selected недоступно' }
+                                    else { $state = $(if ([bool]$sel -eq [bool]$chk.selected) { 'satisfied' } else { 'unsatisfied' }) }
                                 } else { $state = 'satisfied' }
                             }
                         }
