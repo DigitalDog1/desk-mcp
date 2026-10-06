@@ -77,18 +77,22 @@ say(await call("computer_verify_state", {
 }));
 await sleep(pause);
 
-step(7, "Пометить посылку доставленной: статус в окне меняется");
+step(7, "Переключиться на вкладку Details через SelectionItem, без клика по заголовку");
+say(await call("computer_select", { title: TITLE, id: "tabsDetails", value: "Details" }));
+await sleep(pause);
+
+step(8, "Пометить посылку доставленной: статус в окне меняется");
 say(await call("computer_invoke", { title: TITLE, id: "btnDeliver" }));
 await sleep(pause);
 
-step(8, "Нажать Copy tracking number и прочитать буфер обмена: эффект виден на уровне Windows");
+step(9, "Нажать Copy tracking number и прочитать буфер обмена: эффект виден на уровне Windows");
 say(await call("computer_invoke", { title: TITLE, id: "btnCopyTracking" }));
 await sleep(pause);
 const clip = await call("computer_clipboard_get", {});
 console.log(`буфер обмена: "${clip.text}" (${clip.length} символов)`);
 await sleep(pause);
 
-step(9, "Снимок окна для документации");
+step(10, "Снимок окна для документации");
 const shot = await client.callTool({
   name: "computer_screenshot", arguments: { window: TITLE, format: "png" },
 });
