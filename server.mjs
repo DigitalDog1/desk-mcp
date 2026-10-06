@@ -827,6 +827,30 @@ server.registerTool(
 );
 
 server.registerTool(
+  "computer_wait_element",
+  {
+    title: "Ждать элемент",
+    description: "Ждёт условие вместо слепой паузы: появления, исчезновения или смены состояния элемента. " +
+      "Общий бюджет времени общий с поиском, опрос идёт с экспоненциальной задержкой. " +
+      "Таймаут возвращается как satisfied:false с reason:timeout, а не ошибкой: агент должен " +
+      "отличать «не дождался» от «сломалось», и отсутствие элемента по таймауту ничего не доказывает.",
+    inputSchema: {
+      title: z.string().optional().describe("подстрока заголовка окна"),
+      name: z.string().optional().describe("имя элемента, подстрока"),
+      type: z.string().optional().describe("роль: Button, Edit, ListItem..."),
+      id: z.string().optional().describe("automationId, самый надёжный признак"),
+      mode: z.enum(["appear", "disappear", "state"]).optional().default("appear"),
+      desiredState: z.enum(["enabled", "disabled", "visible", "offscreen", "on", "off", "indeterminate"])
+        .optional()
+        .describe("только для mode=state"),
+      timeoutMs: z.number().int().min(0).max(120000).optional().default(5000),
+      maxDepth: z.number().int().min(1).max(20).optional().default(8),
+    },
+  },
+  R(async (a) => ok(await worker.call("wait_element", a))),
+);
+
+server.registerTool(
   "computer_mouse_button",
   {
     title: "Зажать/отпустить кнопку мыши",

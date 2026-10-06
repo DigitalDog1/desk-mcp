@@ -980,12 +980,23 @@ function Invoke-ScreenOcr {
 
 $script:UiCache = @{}
 
+# Монотонные миллисекунды.
+#
+# [Environment]::TickCount64 в PowerShell 5.1 НЕ существует и молча отдаёт
+# $null, без всякой ошибки. Из-за этого в кэше условие "запись моложе 1200 мс"
+# превращалось в ($null - $null) -lt 1200, то есть всегда истинно, и кэш UIA
+# не протухал НИКОГДА. Stopwatch.GetTimestamp() работает в этой версии и
+# переполняется практически никогда.
+function Get-MonoMs {
+    return [long]([Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency * 1000)
+}
+
 # Обход дерева UIA стоит сотни миллисекунд, а агентный цикл обычно делает
 # find → invoke → verify на одном и том же окне. Короткий кэш (1.2 с) убирает
 # повторный обход, но недостаточно мал, чтобы отдать протухшие данные после
 # перерисовки интерфейса.
 function Get-UiCached([string]$key, [scriptblock]$make) {
-    $now = [Environment]::TickCount64
+    $now = Get-MonoMs
     if ($script:UiCache.ContainsKey($key)) {
         $e = $script:UiCache[$key]
         if (($now - $e.at) -lt 1200) { return $e.data }
@@ -1690,6 +1701,98 @@ function Invoke-Tool {
                 if ($ms -lt 0 -or $ms -gt 120000) { throw "Пауза вне диапазона 0..120000 мс: $ms" }
                 Start-Sleep -Milliseconds $ms
                 $result = [ordered]@{ ok = $true; waitedMs = $ms }
+            }
+
+            'wait_element' {
+                # Ожидание условия вместо слепых пауз. Слепое computer_wait
+                # заставляет агента угадывать время, а здесь тот же бюджет,
+                # что и у поиска, и честный отчёт "условие не наступило", а не
+                # "элемента нет".
+                $wmode = if ($a.mode) { [string]$a.mode } else { 'appear' }
+                if ($wmode -notin @('appear', 'disappear', 'state')) {
+                    throw "Неизвестный режим ожидания '$wmode' (appear|disappear|state)"
+                }
+                $timeoutMs = if ($a.timeoutMs) { [int]$a.timeoutMs } else { 5000 }
+                if ($timeoutMs -lt 0 -or $timeoutMs -gt 120000) {
+                    throw "Бюджет ожидания вне диапазона 0..120000 мс: $timeoutMs"
+                }
+                $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
+                $desired = if ($a.desiredState) { ([string]$a.desiredState).ToLowerInvariant() } else { '' }
+                if ($wmode -eq 'state' -and $desired -eq '') {
+                    throw "Для mode=state нужен desiredState (enabled|disabled|visible|offscreen|on|off|indeterminate)"
+                }
+                if ($wmode -ne 'state' -and $desired -ne '') {
+                    throw "desiredState работает только с mode=state"
+                }
+
+                # Дедлайн в той же шкале, что Get-MonoMs.
+                $deadline = (Get-MonoMs) + $timeoutMs
+                $delay = 50
+                $started = Get-MonoMs
+                $probes = 0
+                $satisfied = $false
+                $seen = $null
+
+                while ($true) {
+                    $probes++
+                    $el = $null
+                    $nat = Invoke-UiAct 'find' $a $depth 1
+                    if ($nat -and $nat.status -eq 'ok' -and @($nat.elements).Count -gt 0) {
+                        $el = @($nat.elements)[0]
+                    } elseif (-not $nat) {
+                        # нативный слой недоступен, ищем старым путём
+                        $hits = Search-UiElements ([string]$a.title) ([string]$a.name) `
+                                               ([string]$a.type) ([string]$a.id) $depth 1
+                        if (@($hits).Count -gt 0) { $el = Convert-ElementInfo @($hits)[0] }
+                    }
+                    $found = ($null -ne $el)
+                    if ($found) { $seen = $el }
+
+                    if ($wmode -eq 'appear' -and $found) { $satisfied = $true; break }
+                    if ($wmode -eq 'disappear' -and -not $found) { $satisfied = $true; break }
+                    if ($wmode -eq 'state' -and $found) {
+                        $ok = switch ($desired) {
+                            'enabled'       { $el.enabled -eq $true }
+                            'disabled'      { $el.enabled -eq $false }
+                            'visible'       { $el.offscreen -eq $false }
+                            'offscreen'     { $el.offscreen -eq $true }
+                            'on'            { "$($el.toggle)" -eq 'On' }
+                            'off'           { "$($el.toggle)" -eq 'Off' }
+                            'indeterminate' { "$($el.toggle)" -eq 'Indeterminate' }
+                            default         { $false }
+                        }
+                        if ($ok) { $satisfied = $true; break }
+                    }
+
+                    # Новый опрос не начинаем после дедлайна. Вызов Windows,
+                    # который уже ушёл, может вернуться позже, это честно
+                    # отражено в elapsedMs.
+                    if ((Get-MonoMs) -ge $deadline) { break }
+                    Start-Sleep -Milliseconds $delay
+                    if ($delay -lt 400) { $delay = [Math]::Min($delay * 2, 400) }
+                }
+
+                $elapsed = [int]((Get-MonoMs) - $started)
+                if ($satisfied) {
+                    $result = [ordered]@{
+                        ok = $true; satisfied = $true; mode = $wmode
+                        desiredState = $(if ($desired) { $desired } else { $null })
+                        elapsedMs = $elapsed; probes = $probes
+                        element = $(if ($seen) { $seen } else { $null })
+                    }
+                } else {
+                    # Таймаут это не поломка инструмента, а исход ожидания, поэтому
+                    # ошибкой не считаем: иначе агент не отличит "не дождался" от
+                    # "сломалось".
+                    $result = [ordered]@{
+                        ok = $true; satisfied = $false; mode = $wmode
+                        desiredState = $(if ($desired) { $desired } else { $null })
+                        reason = 'timeout'
+                        elapsedMs = $elapsed; probes = $probes; timeoutMs = $timeoutMs
+                        element = $(if ($seen) { $seen } else { $null })
+                        note = 'Бюджет исчерпан. Это не доказательство отсутствия элемента.'
+                    }
+                }
             }
 
             'mouse_button' {
