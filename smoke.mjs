@@ -567,6 +567,43 @@ if (!withHwnd) {
   }
 }
 
+console.log("== пачка подставляет значение из предыдущего шага ==");
+// Цикл «прочитал поле, решил, нажал» без подстановки стоит три круга к агенту,
+// с подстановкой один. Круг это секунды модели, а не миллисекунды инструмента,
+// поэтому именно число кругов решает скорость.
+{
+  const batch = await call("computer_batch", {
+    steps: [
+      { tool: "computer_find", args: { title: demo, id: "searchBox" } },
+      { tool: "computer_set_value", args: { title: demo, id: "searchBox", value: "${steps.0.elements.0.value}" } },
+      { tool: "computer_find", args: { title: demo, id: "searchBox" } },
+    ],
+  });
+  const txt = batch.content?.[0]?.text ?? "";
+  if (/"ok":\s*false/.test(txt) || txt.includes("Подстановка не сработала")) {
+    fail++;
+    console.log(`  СБОЙ подстановки в пачке: ${txt.replace(/\s+/g, " ").slice(0, 160)}`);
+  } else {
+    pass++;
+    console.log(`  ОК   значение прочитано на первом шаге и подставлено на втором, ${txt.length} симв. ответа`);
+  }
+  // Кривая ссылка обязана быть отказом, а не текстом в поле.
+  const bad = await call("computer_batch", {
+    steps: [
+      { tool: "computer_find", args: { title: demo, id: "searchBox" } },
+      { tool: "computer_set_value", args: { title: demo, id: "searchBox", value: "${steps.0.чегоНетТут}" } },
+    ],
+  });
+  const btxt = bad.content?.[0]?.text ?? "";
+  if (btxt.includes("Подстановка не сработала") && /"ok":\s*false/.test(btxt)) {
+    pass++;
+    console.log("  ОК   несуществующий путь в ссылке дал отказ, а не пустую строку в действие");
+  } else {
+    fail++;
+    console.log(`  СБОЙ: кривая ссылка прошла молча: ${btxt.replace(/\s+/g, " ").slice(0, 140)}`);
+  }
+}
+
 console.log("== два README описывают одно и то же ==");
 {
   const r = spawnSync(process.execPath, [path.join(__dirname, "check-docs.mjs")], {

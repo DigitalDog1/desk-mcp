@@ -272,8 +272,11 @@ stall. Full walk of the demo app, start to finish, including worker start:
   pattern that runs without selecting anything comes back as `notSelected`, which is
   not success.
 - `computer_batch`: up to 50 tools in one call, executed step by step so every step
-  obeys the same budgets. A tool disabled through `DESK_DISABLE_TOOLS` is refused by
-  name here too.
+  obeys the same budgets. An argument like `"${steps.0.element.name}"` is filled in from an
+  earlier step of the same batch, so a read-decide-act loop is one round trip instead of
+  three. A reference to a later step or to a path that is not there is refused with
+  `InvalidArgument` rather than writing a literal into the action. A tool disabled
+  through `DESK_DISABLE_TOOLS` is refused by name here too.
 
 **Windows and desktop**
 

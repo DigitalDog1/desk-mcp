@@ -643,7 +643,11 @@ reg(
       "Выполняет несколько инструментов подряд за один вызов и возвращает результат каждого. " +
       "Основной инструмент агентного цикла: не нужно делать 10 отдельных вызовов ради " +
       "«открыть, ввести, нажать, снять». Останавливается на первой ошибке, если у шага не " +
-      "задано stopOnError: false.",
+      "задано stopOnError: false. Аргумент вида \"${steps.0.element.name}\" подставляет " +
+      "значение из результата более раннего шага того же пакета, поэтому цикл " +
+      "«прочитал, решил, нажал» укладывается в один вызов вместо трёх кругов к агенту. " +
+      "Ссылка на шаг вперёд или на непройденный путь даёт отказ с кодом InvalidArgument, " +
+      "а не пустую строку.",
     inputSchema: {
       steps: z.array(z.object({
         tool: z.string().describe("имя инструмента desk-mcp"),
@@ -673,6 +677,56 @@ const TOOL_ALIAS = {
   computer_verify_state: "verify",
 };
 
+// Подстановка вида ${steps.0.element.name} в аргументы следующих шагов.
+// Именно это и решает вопрос скорости: цикл «прочитал поле, выбрал значение,
+// нажал» без подстановки стоит три круга к агенту, а с ней один вызов. Круг — это
+// не миллисекунды инструмента, это 2-3 секунды модели на каждое решение, и на
+// длинной задаче их накапливается больше, чем все задержки вместе.
+// Ссылка разрешается только на уже выполненные шаги: шаг не может читать будущее.
+// В сегментах пути кириллица разрешена: \w в JS её не покрывает, и ссылка с
+// русским именем поля молча не сматчилась бы, а её текст ушёл бы в действие.
+const STEP_REF = /\$\{steps\.(\d+)((?:\.[^\s.[\]]+|\[\d+\])*)\}/g;
+
+function resolveStepRef(str, done, where) {
+  const misses = [];
+  const value = str.replace(STEP_REF, (_, idx, path) => {
+    const i = Number(idx);
+    const prev = done.find((o) => o.index === i);
+    if (!prev) { misses.push(`шаг ${i} ещё не выполнен`); return ""; }
+    if (!prev.ok) { misses.push(`шаг ${i} провалился: ${prev.error ?? "?"}`); return ""; }
+    let cur = prev.data;
+    for (const part of path.match(/[^.[\]]+/g) ?? []) {
+      if (cur == null || cur === undefined) { misses.push(`нет ${path} в шаге ${i}`); return ""; }
+      cur = cur[/^\d+$/.test(part) ? Number(part) : part];
+    }
+    if (cur === undefined || cur === null) { misses.push(`нет ${path} в шаге ${i}`); return ""; }
+    return typeof cur === "object" ? JSON.stringify(cur) : String(cur);
+  });
+  // Молча подставить пустую строку хуже, чем отказать: действие ушло бы не туда.
+  // Страховка от кривой ссылки: если после подстановки остался кусок "${steps.",
+  // значит шаблон написан не по грамматике, и его текст не должен уехать в действие.
+  if (value.includes("${steps.")) misses.push(`ссылка не разобрана: "${value}"`);
+  if (misses.length) {
+    throw errWith(
+      `Подстановка не сработала (${misses.join("; ")}) в аргументе ${where}: "${str}". ` +
+        `Ссылка вида ${"${steps.Н.путь}"} читает результат шага Н из этого же пакета.`,
+      "InvalidArgument",
+    );
+  }
+  return value;
+}
+
+function resolveArgs(args, done) {
+  if (args === null || typeof args !== "object") return args;
+  if (Array.isArray(args)) return args.map((v) => resolveArgs(v, done));
+  const out = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v === "string" && v.includes("${steps.")) out[k] = resolveStepRef(v, done, k);
+    else out[k] = resolveArgs(v, done);
+  }
+  return out;
+}
+
 async function runBatch(steps) {
   const out = [];
   let stoppedAt = null;
@@ -682,7 +736,7 @@ async function runBatch(steps) {
     let tool = given;
     if (TOOL_ALIAS[tool]) tool = TOOL_ALIAS[tool];
     else if (tool.startsWith("computer_")) tool = tool.slice("computer_".length);
-    const args = s.args ?? {};
+    let args = s.args ?? {};
     const stopOnError = s.stopOnError !== false;
     if (!WORKER_TOOLS.has(tool)) {
       out.push({
@@ -703,6 +757,7 @@ async function runBatch(steps) {
       continue;
     }
     try {
+      args = resolveArgs(args, out);
       const data = UI_TOOLS.has(tool)
         ? await callUi(tool, args)
         : await worker.call(tool, args, 60_000);
