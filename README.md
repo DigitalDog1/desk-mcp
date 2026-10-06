@@ -374,25 +374,17 @@ while every other window kept working.
 
 ## Games
 
-Aiming in a shooter does not work through click and move, and no amount of clicking
-fixes it. Most shooters read the mouse through raw input: the engine takes only
-hardware packets and ignores synthetic input, so buttons fire while the camera does
-not turn. Aim with relative movement instead of absolute positioning:
+Aiming in a shooter does not work through click and move: most shooters read the mouse
+through raw input and ignore synthetic packets, so buttons fire while the camera does
+not turn. Aim with relative movement instead, in small steps:
 
 ```json
 { "tool": "computer_mouse_move", "args": { "dx": 220, "dy": -40, "steps": 20, "stepMs": 8 } }
 ```
 
-`steps` matters. Games apply sensitivity to every mouse event, so one 220 px jump
-looks like a flick and twenty small steps look like a hand. The tool measures how far
-the cursor actually went and tops up the remainder, because Windows coalesces
-injected motion.
-
-| Game | Switch | Verified |
-| --- | --- | --- |
-| Counter-Strike: Source (Source 2013) | none needed, `rawinput` does not exist and the engine reads `WM_MOUSEMOVE` | yes, live |
-| CS:GO / CS2 | `cl_rawinput 0` in the console or `+cl_rawinput 0` in launch options | not verified |
-| Steam Input (Force Steam Input) | turn off per game, it injects raw input of its own | not verified |
+Games apply sensitivity to every mouse event, so one 220 px jump looks like a flick and
+twenty small steps look like a hand. Verified live on Counter-Strike: Source only;
+CS2 and Steam Input are listed in the project handover as unverified.
 
 Drawing apps need the opposite trick. MS Paint ignores a click with no motion between
 button down and button up: it draws nothing and the fill tool does not fire at all.
