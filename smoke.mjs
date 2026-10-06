@@ -567,6 +567,26 @@ if (!withHwnd) {
   }
 }
 
+console.log("== адресация элементов по elementId вместо имени ==");
+// Имя элемента может дублироваться или перехватываться при пересоздании кнопки.
+// elementId из computer_find адресует конкретный экземпляр элемента в STA-слое.
+{
+  const fRes = await call("computer_find", { hwnd: withHwnd?.hwnd, limit: 1 });
+  const fParsed = JSON.parse(fRes.content?.[0]?.text ?? "{}");
+  const elFirst = fParsed.elements?.[0];
+  const hasElId = !!elFirst?.elementId;
+  const badInvoke = await call("computer_invoke", { elementId: "el_nonexistent_99999" });
+  const badTxt = badInvoke.content?.[0]?.text ?? "";
+  const okBad = badTxt.includes("ElementNotFound") || badTxt.includes("не найден в кэше");
+  if (hasElId && okBad) {
+    pass++;
+    console.log(`  ОК   элемент получил идентификатор ${elFirst.elementId}, несуществующий elementId дал отказ`);
+  } else {
+    fail++;
+    console.log(`  СБОЙ адресация по elementId: hasElId=${hasElId}, okBad=${okBad}`);
+  }
+}
+
 console.log("== пачка подставляет значение из предыдущего шага ==");
 // Цикл «прочитал поле, решил, нажал» без подстановки стоит три круга к агенту,
 // с подстановкой один. Круг это секунды модели, а не миллисекунды инструмента,

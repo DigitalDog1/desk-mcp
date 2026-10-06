@@ -967,6 +967,31 @@ public static class UiaNative
     // Статусы: ok / notfound / disabled / noPattern / error / unknownAction.
     // PowerShell по ним решает, что делать дальше: отказаться, отдать
     // результат или откатиться на пиксельный клик.
+    private static int _elementSeq = 0;
+    private static readonly Dictionary<string, AutomationElement> _elementMap =
+        new Dictionary<string, AutomationElement>();
+    private static readonly List<string> _elementRing = new List<string>();
+    private const int MaxCachedElements = 1000;
+
+    public static string RegisterElement(AutomationElement el)
+    {
+        if (el == null) return "";
+        lock (_elementMap)
+        {
+            _elementSeq++;
+            string id = "el_" + _elementSeq;
+            _elementMap[id] = el;
+            _elementRing.Add(id);
+            if (_elementRing.Count > MaxCachedElements)
+            {
+                string old = _elementRing[0];
+                _elementRing.RemoveAt(0);
+                _elementMap.Remove(old);
+            }
+            return id;
+        }
+    }
+
     public static string ActJson(long hwnd, string action, string nameLike, string typeName,
                                  string automationId, int maxDepth, string value, int limit)
     {
@@ -988,56 +1013,94 @@ public static class UiaNative
 
             AutomationElement el = (AutomationElement)hits[0][0];
             string ct = (string)hits[0][1];
-            string info = ElementInfoJson(el, ct);
-
-            // Ложное «сработало» хуже отказа: InvokePattern на
-            // заблокированном элементе в Windows возвращается довольным и
-            // не делает ничего. Поэтому проверяем заранее.
-            bool enabled;
-            try { enabled = el.Current.IsEnabled; } catch (Exception) { enabled = false; }
-            if (!enabled) return "{\"status\":\"disabled\",\"element\":" + info + "}";
-
-            if (action == "invoke")
-            {
-                try
-                {
-                    InvokePattern ip = el.GetCurrentPattern(InvokePattern.Pattern) as InvokePattern;
-                    if (ip == null) return "{\"status\":\"noPattern\",\"element\":" + info + "}";
-                    ip.Invoke();
-                    return "{\"status\":\"ok\",\"via\":\"InvokePattern\",\"element\":" + info + "}";
-                }
-                catch (Exception ex)
-                {
-                    return "{\"status\":\"error\",\"error\":" + J(ex.Message) + ",\"element\":" + info + "}";
-                }
-            }
-
-            if (action == "set_value")
-            {
-                try
-                {
-                    ValuePattern vp = el.GetCurrentPattern(ValuePattern.Pattern) as ValuePattern;
-                    if (vp == null) return "{\"status\":\"noPattern\",\"element\":" + info + "}";
-                    vp.SetValue(value == null ? "" : value);
-                    return "{\"status\":\"ok\",\"via\":\"ValuePattern\",\"element\":" + info + "}";
-                }
-                catch (Exception ex)
-                {
-                    return "{\"status\":\"error\",\"error\":" + J(ex.Message) + ",\"element\":" + info + "}";
-                }
-            }
-
-            if (action == "select")
-            {
-                return SelectJson(el, ct, info, value);
-            }
-
-            return "{\"status\":\"unknownAction\",\"error\":" + J(action) + "}";
+            return ExecuteAct(el, ct, action, value, null);
         }
         catch (Exception ex)
         {
             return "{\"status\":\"error\",\"error\":" + J(ex.GetType().Name + ": " + ex.Message) + "}";
         }
+    }
+
+    public static string ActByElementIdJson(string elementId, string action, string value)
+    {
+        if (IsBlank(elementId))
+        {
+            return "{\"status\":\"notFound\",\"error\":\"elementId не указан\"}";
+        }
+        AutomationElement el = null;
+        lock (_elementMap)
+        {
+            if (!_elementMap.TryGetValue(elementId, out el) || el == null)
+            {
+                return "{\"status\":\"notFound\",\"error\":" + J("Элемент '" + elementId + "' не найден в кэше (устарел или сессия была сброшена)") + "}";
+            }
+        }
+        string ct = "";
+        try
+        {
+            ct = TypeShort(el.Current.ControlType);
+        }
+        catch (ElementNotAvailableException)
+        {
+            lock (_elementMap) { _elementMap.Remove(elementId); }
+            return "{\"status\":\"stale\",\"error\":" + J("Элемент '" + elementId + "' больше недоступен в Windows (окно закрыто или элемент удалён)") + "}";
+        }
+        catch (Exception ex)
+        {
+            lock (_elementMap) { _elementMap.Remove(elementId); }
+            return "{\"status\":\"stale\",\"error\":" + J("Элемент '" + elementId + "' недоступен: " + ex.Message) + "}";
+        }
+
+        return ExecuteAct(el, ct, action, value, elementId);
+    }
+
+    private static string ExecuteAct(AutomationElement el, string ct, string action, string value, string elementId)
+    {
+        string info = ElementInfoJson(el, ct, elementId);
+
+        // Ложное «сработало» хуже отказа: InvokePattern на
+        // заблокированном элементе в Windows возвращается довольным и
+        // не делает ничего. Поэтому проверяем заранее.
+        bool enabled;
+        try { enabled = el.Current.IsEnabled; } catch (Exception) { enabled = false; }
+        if (!enabled) return "{\"status\":\"disabled\",\"element\":" + info + "}";
+
+        if (action == "invoke")
+        {
+            try
+            {
+                InvokePattern ip = el.GetCurrentPattern(InvokePattern.Pattern) as InvokePattern;
+                if (ip == null) return "{\"status\":\"noPattern\",\"element\":" + info + "}";
+                ip.Invoke();
+                return "{\"status\":\"ok\",\"via\":\"InvokePattern\",\"element\":" + info + "}";
+            }
+            catch (Exception ex)
+            {
+                return "{\"status\":\"error\",\"error\":" + J(ex.Message) + ",\"element\":" + info + "}";
+            }
+        }
+
+        if (action == "set_value")
+        {
+            try
+            {
+                ValuePattern vp = el.GetCurrentPattern(ValuePattern.Pattern) as ValuePattern;
+                if (vp == null) return "{\"status\":\"noPattern\",\"element\":" + info + "}";
+                vp.SetValue(value == null ? "" : value);
+                return "{\"status\":\"ok\",\"via\":\"ValuePattern\",\"element\":" + info + "}";
+            }
+            catch (Exception ex)
+            {
+                return "{\"status\":\"error\",\"error\":" + J(ex.Message) + ",\"element\":" + info + "}";
+            }
+        }
+
+        if (action == "select")
+        {
+            return SelectJson(el, ct, info, value);
+        }
+
+        return "{\"status\":\"unknownAction\",\"error\":" + J(action) + "}";
     }
 
     // Выбор значения в выпадающем списке, поле со списком или на вкладке.
@@ -1324,6 +1387,15 @@ public static class UiaNative
         return Run(timeoutMs, job);
     }
 
+    public static UiaResult RunActByElementId(int timeoutMs, string elementId, string action, string value)
+    {
+        Func<object> job = delegate
+        {
+            return ActByElementIdJson(elementId, action, value);
+        };
+        return Run(timeoutMs, job);
+    }
+
     public static string SearchJson(string titleLike, long hwnd, string nameLike, string typeName,
                                     string automationId, int maxDepth, int limit)
     {
@@ -1479,10 +1551,20 @@ public static class UiaNative
 
     private static string ElementInfoJson(AutomationElement el, string ct)
     {
+        return ElementInfoJson(el, ct, null);
+    }
+
+    private static string ElementInfoJson(AutomationElement el, string ct, string elementId)
+    {
+        if (IsBlank(elementId))
+        {
+            elementId = RegisterElement(el);
+        }
         AutomationElement.AutomationElementInformation info = el.Current;
 
         StringBuilder b = new StringBuilder(256);
-        b.Append("{\"name\":").Append(J(Trunc(info.Name, 160)));
+        b.Append("{\"elementId\":").Append(J(elementId));
+        b.Append(",\"name\":").Append(J(Trunc(info.Name, 160)));
         b.Append(",\"type\":").Append(J(ct));
         b.Append(",\"id\":").Append(J(info.AutomationId));
         b.Append(",\"class\":").Append(J(info.ClassName));

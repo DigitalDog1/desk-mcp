@@ -265,10 +265,11 @@ stall. Full walk of the demo app, start to finish, including worker start:
 - `computer_polyline`: one continuous stroke through a list of points. N separate
   drags lift the pen on every vertex and the line arrives as broken segments.
 - `computer_invoke`: presses through `InvokePattern` **without taking the mouse**
-  and without bringing the window forward. This is what the clip above uses.
-- `computer_set_value`: writes through `ValuePattern`, also without focus.
+  and without bringing the window forward. Addressed by name or directly by `elementId`
+  from `computer_find` (avoids re-scanning and prevents mis-clicks if UI changes).
+- `computer_set_value`: writes through `ValuePattern`, also without focus, accepts `elementId`.
 - `computer_select`: picks a value in a dropdown, combo box, list or tab through
-  `SelectionItem` and `ExpandCollapse`, opening and closing it again by itself. A
+  `SelectionItem` and `ExpandCollapse`, opening and closing it again by itself (accepts `elementId`). A
   pattern that runs without selecting anything comes back as `notSelected`, which is
   not success.
 - `computer_batch`: up to 50 tools in one call, executed step by step so every step

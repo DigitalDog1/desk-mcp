@@ -826,6 +826,8 @@ reg(
       "на клик по центру границ элемента (тогда окно получит фокус).",
     inputSchema: {
       title: z.string().optional(), 
+      hwnd: z.number().int().optional().describe("дескриптор окна из computer_windows"),
+      elementId: z.string().optional().describe("идентификатор элемента из computer_find; прямой вызов защищает от перехвата действия"),
       name: z.string().optional(),
       type: z.string().optional(),
       id: z.string().optional(),
@@ -845,6 +847,8 @@ reg(
       "проверяй результат через computer_verify_state, а не по факту вызова.",
     inputSchema: {
       title: z.string().optional(), 
+      hwnd: z.number().int().optional().describe("дескриптор окна из computer_windows"),
+      elementId: z.string().optional().describe("идентификатор элемента из computer_find"),
       name: z.string().optional(),
       type: z.string().optional(),
       id: z.string().optional(),
@@ -866,6 +870,8 @@ reg(
       "если паттерн отработал, а элемент не выбрался, это отдельный отказ, а не успех.",
     inputSchema: {
       title: z.string().optional().describe("подстрока заголовка окна (у живых окон меняется, тогда нужен hwnd)"), 
+      hwnd: z.number().int().optional().describe("дескриптор окна из computer_windows"),
+      elementId: z.string().optional().describe("идентификатор элемента из computer_find"),
       name: z.string().optional().describe("имя элемента со списком, подстрока"),
       type: z.string().optional().describe("роль: ComboBox, List, Tab, ListItem..."),
       id: z.string().optional().describe("automationId элемента со списком"),

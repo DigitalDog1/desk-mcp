@@ -638,7 +638,7 @@ if (-not ("UiaNative" -as [type])) {
     $nativePath = Join-Path $PSScriptRoot 'uia-native.cs'
     if (Test-Path -LiteralPath $nativePath) {
         try {
-            Add-Type -TypeDefinition (Get-Content -Raw -LiteralPath $nativePath) `
+            Add-Type -TypeDefinition (Get-Content -Raw -Encoding UTF8 -LiteralPath $nativePath) `
                 -ReferencedAssemblies UIAutomationClient, UIAutomationTypes, WindowsBase, System.Drawing
             $script:NativeUia = [UiaNative]
         } catch {
@@ -660,6 +660,10 @@ function Invoke-UiAct([string]$action, $a, [int]$depth, [int]$limit) {
     # выдержать и это.
     try {
         if (-not $script:NativeUia) { return $null }
+        if ($a -and $null -ne $a.elementId -and "$($a.elementId)".Trim() -ne '') {
+            $argv = @([int]$script:UiaBudgetMs, [string]$a.elementId, $action, [string]$a.value)
+            return (Invoke-UiaNative 'RunActByElementId' $argv | ConvertFrom-Json)
+        }
         $hwnd = Get-TargetHwnd $a
         if ($hwnd -eq 0) { return $null }
         $argv = @(
@@ -1580,7 +1584,11 @@ function Convert-ElementInfo($pair) {
     $c = $el.Current
     $pats = @()
     try { foreach ($p in $el.GetSupportedPatterns()) { $pats += ($p.ProgrammaticName -replace 'PatternIdentifiers\.', '') } } catch { }
+    $elId = if ($script:NativeUia) {
+        try { [UiaNative]::RegisterElement($el) } catch { '' }
+    } else { '' }
     $info = [ordered]@{
+        elementId = $elId
         name  = (Trunc $c.Name 160)
         type  = $ct
         id    = $c.AutomationId
@@ -2489,15 +2497,17 @@ function Invoke-Tool {
                     if ($nat.status -eq 'disabled') {
                         Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, нажать нельзя. Нажатие отчиталось бы успехом, но ничего не изменит."
                     }
+                    if ($nat.status -eq 'stale' -or $nat.status -eq 'notFound') {
+                        Fail 'ElementNotFound' "$($nat.error)"
+                    }
                     if ($nat.status -eq 'ok') {
                         $result = [ordered]@{ ok = $true; via = $nat.via; element = $nat.element }
                         break
                     }
-                    # notfound сюда НЕ бросаем. Нативный путь смотрит в одно
-                    # окно, выбранное по заголовку, а старый искал во всех
-                    # окнах с таким заголовком. При нескольких пересекающихся
-                    # заголовках отказ здесь ломал бы сценарий, который раньше
-                    # работал. noPattern и error уходят дальше тем же путём.
+                    # notfound сюда НЕ бросаем при поиске по заголовку.
+                }
+                if ($a -and $null -ne $a.elementId -and "$($a.elementId)".Trim() -ne '') {
+                    Fail 'ElementNotFound' "Элемент '$($a.elementId)' не найден или больше недоступен"
                 }
 
                 $hits = Resolve-Target $a
@@ -2542,11 +2552,17 @@ function Invoke-Tool {
                     if ($nat.status -eq 'disabled') {
                         Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
                     }
+                    if ($nat.status -eq 'stale' -or $nat.status -eq 'notFound') {
+                        Fail 'ElementNotFound' "$($nat.error)"
+                    }
                     if ($nat.status -eq 'ok') {
                         $result = [ordered]@{ ok = $true; via = $nat.via; value = [string]$a.value; element = $nat.element }
                         break
                     }
                     # notfound уходит в фоллбэк по той же причине, что и в invoke.
+                }
+                if ($a -and $null -ne $a.elementId -and "$($a.elementId)".Trim() -ne '') {
+                    Fail 'ElementNotFound' "Элемент '$($a.elementId)' не найден или больше недоступен"
                 }
                 $hits = Resolve-Target $a
                 if (@($hits).Count -eq 0) { Fail 'ElementNotFound' "Элемент '$($a.name)' не найден" }
@@ -2636,16 +2652,19 @@ function Invoke-Tool {
                 $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
                 $want = if ($a.value) { [string]$a.value } else { '' }
                 if ($want -eq '') { Fail 'InvalidArgument' "Не передано значение для выбора (value)" }
-                if (-not ([string]$a.title)) {
+                if (-not ([string]$a.title) -and -not $a.hwnd -and -not $a.elementId) {
                     # Без заголовка окна искать негде, и сообщение про
                     # несуществующий сломанный нативный слой тут обманывало:
                     # слой как раз загружен, просто не сказано, где искать.
-                    Fail 'InvalidArgument' "Не указан title: computer_select ищет элемент со списком в конкретном окне"
+                    Fail 'InvalidArgument' "Не указан title, hwnd или elementId: computer_select ищет элемент со списком в конкретном окне"
                 }
                 $nat = Invoke-UiAct 'select' $a $depth 1
                 if ($nat) {
                     if ($nat.status -eq 'disabled') {
                         Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, выбирать нечего."
+                    }
+                    if ($nat.status -eq 'stale' -or $nat.status -eq 'notFound') {
+                        Fail 'ElementNotFound' "$($nat.error)"
                     }
                     if ($nat.status -eq 'noPattern') {
                         Fail 'PatternUnavailable' $nat.error
