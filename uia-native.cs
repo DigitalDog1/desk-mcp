@@ -971,6 +971,42 @@ public static class UiaNative
     private static string SelectJson(AutomationElement el, string ct, string info, string value)
     {
         string wanted = value == null ? "" : value;
+
+        // Элемент, который не умеет выбор, нельзя чинить подбором потомков:
+        // у кнопки нет ни одного паттерна выбора, и обход её потомков всегда
+        // ничего не найдёт. Раньше такой вызов заканчивался «вариант не найден
+        // среди элементов 'Закрыть'» — симптом вместо причины.
+        try
+        {
+            AutomationPattern[] ps = el.GetSupportedPatterns();
+            if (ps != null && ps.Length > 0)
+            {
+                bool selectable = false;
+                for (int i = 0; i < ps.Length; i++)
+                {
+                    string n = PatternShort(ps[i]);
+                    if (n == "SelectionItemPattern" || n == "ExpandCollapsePattern" ||
+                        n == "ValuePattern" || n == "ListPattern" || n == "SelectionPattern")
+                    {
+                        selectable = true;
+                        break;
+                    }
+                }
+                if (!selectable)
+                {
+                    string ename = "";
+                    try { ename = el.Current.Name ?? ""; } catch (Exception) { }
+                    return "{\"status\":\"noPattern\",\"error\":" + J(
+                        "Элемент '" + ename + "' не поддерживает выбор: у него нет ни SelectionItem, " +
+                        "ни ExpandCollapse, ни List. Выбирать в нём нечего.") + "}";
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Сведений о паттернах нет — идём обычным путём и смотрим по факту.
+        }
+
         ExpandCollapsePattern ec = null;
         bool expandedByUs = false;
 
@@ -1097,6 +1133,106 @@ public static class UiaNative
         try { chosen = found.Current.Name; } catch (Exception) { }
         return "{\"status\":\"ok\",\"selected\":true,\"via\":" + J(via) + ",\"selectedName\":" +
                J(chosen) + ",\"element\":" + info + "}";
+    }
+
+    // Таблица одним вызовом через нативные Grid/Table паттерны.
+    //
+    // Без этого чтение таблицы это либо огромное дерево, либо N*M вызовов
+    // computer_find, либо OCR, который путает столбцы. GridPattern отдаёт
+    // значения ячеек напрямую, это единственный способ получить строки и
+    // заголовки без догадок по картинке.
+    // Признака "эта строка является заголовком" у TablePatternInformation в
+    // .NET нет вообще: у паттерна только RowCount, ColumnCount и
+    // RowOrColumnMajor. Проверено рефлексией по типу. Поэтому первая строка
+    // читается как заголовок по соглашению, а не по гарантии паттерна, и
+    // параметр headers позволяет это отключить.
+    private static string TableJson(long hwnd, string nameLike, string typeName,
+                                   string automationId, int maxDepth,
+                                   int maxRows, int maxColumns, bool headers)
+    {
+        List<object[]> hits = SearchCore("", hwnd, nameLike, typeName, automationId, maxDepth, 1);
+        if (hits.Count == 0) return "{\"status\":\"notfound\"}";
+
+        AutomationElement el = (AutomationElement)hits[0][0];
+        string ct = (string)hits[0][1];
+        string info = ElementInfoJson(el, ct);
+
+        GridPattern grid = null;
+        try { grid = el.GetCurrentPattern(GridPattern.Pattern) as GridPattern; } catch (Exception) { }
+        if (grid == null)
+        {
+            return "{\"status\":\"notGrid\",\"error\":" +
+                   J("У элемента нет GridPattern, читать таблицу нечем") +
+                   ",\"element\":" + info + "}";
+        }
+
+        int rowCount = 0;
+        int colCount = 0;
+        try { rowCount = grid.Current.RowCount; } catch (Exception) { }
+        try { colCount = grid.Current.ColumnCount; } catch (Exception) { }
+
+        List<string> headRow = new List<string>();
+        int rStart = 0;
+        if (headers && rowCount > 0)
+        {
+            for (int c = 0; c < colCount && c < maxColumns; c++)
+            {
+                string hn = "";
+                try { hn = grid.GetItem(0, c).Current.Name; } catch (Exception) { }
+                headRow.Add(hn);
+            }
+            rStart = 1;
+        }
+
+        int rEnd = Math.Min(rowCount, rStart + maxRows);
+        int cEnd = Math.Min(colCount, maxColumns);
+
+        StringBuilder rows = new StringBuilder(256);
+        for (int r = rStart; r < rEnd; r++)
+        {
+            if (r > rStart) rows.Append(',');
+            rows.Append('[');
+            for (int c = 0; c < cEnd; c++)
+            {
+                if (c > 0) rows.Append(',');
+                string v = "";
+                try { v = grid.GetItem(r, c).Current.Name; } catch (Exception) { }
+                rows.Append(J(Trunc(v, 200)));
+            }
+            rows.Append(']');
+        }
+
+        // Заголовки экранируются явно. JoinArray склеивает уже готовые JSON-строки
+        // и для сырых значений кавычки не ставит, из-за чего ответ перестаёт
+        // быть валидным JSON: "headers":[ZX-4471-8820,Out for delivery,...]
+        StringBuilder hArr = new StringBuilder(64);
+        hArr.Append('[');
+        for (int i = 0; i < headRow.Count; i++)
+        {
+            if (i > 0) hArr.Append(',');
+            hArr.Append(J(headRow[i]));
+        }
+        hArr.Append(']');
+
+        return "{\"status\":\"ok\",\"table\":{\"rowCount\":" + Count(rowCount) +
+               ",\"columnCount\":" + Count(colCount) +
+               ",\"headers\":" + hArr.ToString() +
+               ",\"rows\":[" + rows.ToString() + "]" +
+               ",\"truncated\":" + ((rowCount > rEnd) ? "true" : "false") +
+               ",\"returnedRows\":" + Count(Math.Max(0, rEnd - rStart)) +
+               ",\"headersByConvention\":true}" +
+               ",\"element\":" + info + "}";
+    }
+
+    public static UiaResult RunTableByHwnd(int timeoutMs, long hwnd, string nameLike,
+                                           string typeName, string automationId, int maxDepth,
+                                           int maxRows, int maxColumns, bool headers)
+    {
+        Func<object> job = delegate
+        {
+            return TableJson(hwnd, nameLike, typeName, automationId, maxDepth, maxRows, maxColumns, headers);
+        };
+        return Run(timeoutMs, job);
     }
 
     public static UiaResult RunActByHwnd(int timeoutMs, long hwnd, string action, string nameLike,

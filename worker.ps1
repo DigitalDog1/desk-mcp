@@ -2267,6 +2267,63 @@ function Invoke-Tool {
                 }
             }
 
+            'read_table' {
+                # Таблица одним вызовом через Grid/Table паттерны. Иначе это либо
+                # огромное дерево, либо N*M поисков, либо OCR, который путает
+                # столбцы.
+                $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
+                $maxRows = if ($a.maxRows) { [int]$a.maxRows } else { 200 }
+                $maxColumns = if ($a.maxColumns) { [int]$a.maxColumns } else { 50 }
+                $useHeaders = if ($null -ne $a.headers) { [bool]$a.headers } else { $true }
+                if ($script:NativeUia) {
+                    $hw = Find-WindowHwnd ([string]$a.title)
+                    if ($hw -ne 0) {
+                        $argv = @([int]$script:UiaBudgetMs, $hw, [string]$a.name, [string]$a.type,
+                                  [string]$a.id, [int]$depth, [int]$maxRows, [int]$maxColumns, $useHeaders)
+                        $nat = (Invoke-UiaNative 'RunTableByHwnd' $argv | ConvertFrom-Json)
+                        if ($nat.status -eq 'ok') {
+                            $result = [ordered]@{
+                                ok = $true; via = 'GridPattern'; table = $nat.table; element = $nat.element
+                            }
+                            break
+                        }
+                        if ($nat.status -eq 'notfound') {
+                            Fail 'ElementNotFound' "Элемент '$($a.name)' не найден — читать нечего"
+                        }
+                        if ($nat.status -eq 'notGrid') {
+                            Fail 'PatternUnavailable' $nat.error
+                        }
+                        Fail 'PatternUnavailable' "Чтение таблицы не удалось: $($nat.status)"
+                    }
+                }
+                Fail 'NotSupported' "Чтение таблицы требует нативного слоя UIA, а он не загрузился: $($script:NativeUiaError)"
+            }
+
+            'polyline' {
+                # Один непрерывный штрих: нажатие в первой точке, обход всех
+                # вершин, отпускание в последней. N отдельных перетаскиваний
+                # поднимают ручку на каждой вершине, и вместо линии получается
+                # пунктир из отдельных отрезков.
+                $pts = @($a.points)
+                if ($pts.Count -lt 2) { Fail 'InvalidArgument' "Нужно минимум две точки, получено $($pts.Count)" }
+                $btn = $(if ($a.button) { [string]$a.button } else { 'left' })
+                $first = $pts[0]
+                $sx = [int]$first[0]; $sy = [int]$first[1]
+                [DeskMcp]::MoveTo($sx, $sy)
+                Start-Sleep -Milliseconds 40
+                $buttonDown = $(if ($btn -eq 'right') { 'right' } elseif ($btn -eq 'middle') { 'middle' } else { 'left' })
+                [DeskMcp]::ButtonDown($buttonDown)
+                foreach ($pt in $pts[1..($pts.Count - 1)]) {
+                    [DeskMcp]::MoveTo([int]$pt[0], [int]$pt[1])
+                    Start-Sleep -Milliseconds 12
+                }
+                $last = $pts[$pts.Count - 1]
+                [DeskMcp]::MoveTo([int]$last[0], [int]$last[1])
+                Start-Sleep -Milliseconds 20
+                [DeskMcp]::ButtonUp($buttonDown)
+                $result = [ordered]@{ ok = $true; points = $pts.Count; button = $btn; note = 'Один штрих без подъёма руки' }
+            }
+
             'select' {
                 # Выбор значения в выпадающем списке, поле со списком или на
                 # вкладке. Раньше это было недостижимо: SelectionItem и
@@ -2280,7 +2337,10 @@ function Invoke-Tool {
                 $nat = Invoke-UiAct 'select' $a $depth 1
                 if ($nat) {
                     if ($nat.status -eq 'disabled') {
-                        Fail 'ElementNotFound' "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, выбирать нечего."
+                        Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, выбирать нечего."
+                    }
+                    if ($nat.status -eq 'noPattern') {
+                        Fail 'PatternUnavailable' $nat.error
                     }
                     if ($nat.status -eq 'ok') {
                         $result = [ordered]@{

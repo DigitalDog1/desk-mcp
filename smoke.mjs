@@ -138,8 +138,105 @@ await checkTarget("computer_verify_state", { title: tKey, expect: [
   { label: "нет такого", selector: { role: "Button", label_contains: "ZZZнеттакого" } },
 ] }, (r, t) => t.includes("unsatisfied"));
 
+console.log("== дельты: повторное чтение не платит дважды ==");
+if (tKey) {
+  const autoArgs = { title: tKey, maxDepth: 5, maxElements: 120, interactiveOnly: true, mode: "auto" };
+  const txt1 = (await call("computer_read_screen", autoArgs)).content?.[0]?.text ?? "";
+  let tok = null;
+  try { tok = JSON.parse(txt1).token ?? null; } catch { /* ответ не JSON — сценарий упадёт на проверке токена */ }
+  if (tok) {
+    pass++;
+    console.log(`  ОК   дельта: первый mode=auto отдал baseline, ${txt1.length} симв.`);
+  } else {
+    fail++;
+    console.log(`  СБОЙ дельта: mode=auto не вернул токен: ${txt1.slice(0, 120)}`);
+  }
+  // Второе чтение того же окна без изменений обязано стоить в разы дешевле.
+  const txt2 = (await call("computer_read_screen", { ...autoArgs, since: tok })).content?.[0]?.text ?? "";
+  let j2 = null;
+  try { j2 = JSON.parse(txt2); } catch { /* не JSON */ }
+  if (j2?.kind === "diff" && Array.isArray(j2.changes) && j2.changes.length === 0) {
+    pass++;
+    const times = Math.round(txt1.length / Math.max(1, txt2.length));
+    console.log(`  ОК   дельта: повтор без изменений — ${txt2.length} симв. вместо ${txt1.length} (в ${times} раз меньше), changes=[]`);
+  } else if (j2?.kind === "full" && /устарел|не меньше полного/.test(txt2)) {
+    pass++;
+    console.log(`  ОК   дельта: полный вид с внятным объяснением вместо выдуманной дельты`);
+  } else {
+    fail++;
+    console.log(`  СБОЙ дельта: kind=${j2?.kind}, changes=${JSON.stringify(j2?.changes)?.slice(0, 120)}`);
+  }
+  // Чужой токен обязан дать полный вид: сравнивать с чужой базой нельзя.
+  const txt3 = (await call("computer_read_screen", { ...autoArgs, since: "мусорный-токен" })).content?.[0]?.text ?? "";
+  if (/устарел|не меньше полного/.test(txt3) || /"kind":\s*"full"/.test(txt3)) {
+    pass++;
+    console.log("  ОК   дельта: чужой токен вернул полный вид, а не сравнение с чужой базой");
+  } else {
+    fail++;
+    console.log(`  СБОЙ дельта: чужой токен дал ${txt3.slice(0, 120)}`);
+  }
+}
 
+console.log("== ожидание элемента (вместо сна и вслепую) ==");
+// Таймаут — исход ожидания, а не поломка: satisfied:false с причиной timeout.
+await checkTarget("computer_wait_element", { title: tKey, name: "ZZZнеттакого", mode: "appear", timeoutMs: 600 },
+  (r, t) => /"satisfied":\s*false/.test(t) && /"reason":\s*"timeout"/.test(t));
+// Состояние берём с элемента, который find уже нашёл: цель не выдумывается.
+const btnRes = tKey ? await call("computer_find", { title: tKey, type: "Button", limit: 1 }) : null;
+let btn = null;
+try { btn = JSON.parse(btnRes?.content?.[0]?.text ?? "{}").elements?.[0] ?? null; } catch { /* не JSON */ }
+if (btn && (btn.id || btn.name)) {
+  const pick = btn.id ? { id: btn.id } : { name: btn.name };
+  await checkTarget("computer_wait_element", { title: tKey, ...pick, type: "Button", mode: "state", desiredState: "enabled", timeoutMs: 1500 },
+    (r, t) => /"satisfied":\s*true/.test(t));
+} else {
+  skipped++;
+  console.log("  ПРОПУЩЕНО computer_wait_element state — в целевом окне не нашлось кнопки");
+}
 
+console.log("== таблица и выбор: отказ там, где данных нет ==");
+// Таблицы в окне может не быть, но несуществующий элемент — это всегда отказ
+// с кодом, и код обязан называть причину, а не молчать.
+await checkTarget("computer_read_table", { title: tKey, name: "ZZZнеттакойтаблицы" },
+  (r, t) => /ElementNotFound/.test(t));
+// Кнопка не умеет выбор: это не «элемент не найден», а «паттерна нет».
+await checkTarget("computer_select", { title: tKey, name: btn?.name ?? "ZZZнеттакой", type: "Button", value: "любое" },
+  (r, t) => /PatternUnavailable|NotSupported|ElementNotFound/.test(t));
+
+// Положительные сценарии таблицы и выбора требуют окна со сеткой и списком.
+// В штатном прогоне это демонстрационное окно; если его нет — честный пропуск,
+// а не подгонка под произвольное чужое окно.
+const demo = (() => {
+  try {
+    return (JSON.parse(winList?.content?.[0]?.text ?? "{}").windows ?? [])
+      .find((w) => w.visible && /Parcel Tracker/i.test(w.title))?.title ?? null;
+  } catch { return null; }
+})();
+if (demo) {
+  const tbl = await checkTarget("computer_read_table", { title: demo, id: "listScans", maxRows: 8 },
+    (r, t) => /"headers"/.test(t) && /"rows"/.test(t) && !/"truncated":\s*true/.test(t));
+  // checkTarget отдаёт свой внутренний результат с полем txt, а не сырой
+  // ответ MCP: разбираем текст, а не ищем content[0].
+  const tblText = tbl?.txt ?? "";
+  let head = null;
+  try { head = JSON.parse(tblText).table?.headers ?? null; } catch { head = null; }
+  if (head && head.length >= 3) {
+    pass++;
+    console.log(`  ОК   заголовки таблицы процитированы: ${head.join(", ")}`);
+  } else {
+    fail++;
+    console.log(`  СБОЙ заголовки таблицы: ${JSON.stringify(head)} в «${tblText.slice(0, 100)}»`);
+  }
+  // У комбобокса имя приходит от подписи ("Carrier"), а automationId — от
+  // Control.Name ("comboCarrier"). Поиск по id — самый надёжный признак.
+  await checkTarget("computer_select", { title: demo, id: "comboCarrier", value: "DHL" },
+    (r, t) => /DHL/.test(t));
+} else {
+  skipped += 2;
+  console.log("  ПРОПУЩЕНО computer_read_table и computer_select (положительные) — демо-окно не открыто");
+}
+// computer_polyline в автопрогон не входит: он двигает настоящий курсор.
+// Проверяется вручную на холсте, см. _t_poly.mjs и _t_poly_sampler.ps1.
 
 await check("computer_wait", { ms: 50 }, (r, t) => t.includes("waitedMs"));
 
@@ -246,6 +343,14 @@ const neg = [
   ["computer_mouse_move", { dx: 0, dy: 0, steps: 999 }],
   ["computer_mouse_move", { dx: 0, dy: 0, stepMs: 9999 }],
   ["computer_click", { x: 1, y: 1, modifiers: ["nosuchmod"] }],
+  ["computer_wait_element", { title: "Microsoft", mode: "state" }],
+  ["computer_wait_element", { title: "Microsoft", mode: "неттакогорежима" }],
+  ["computer_wait_element", { title: "Microsoft", mode: "state", desiredState: "небывает" }],
+  ["computer_read_table", { title: "Microsoft", maxRows: 99999 }],
+  ["computer_select", { title: "Microsoft", name: "ZZZнеттакой" }],
+  ["computer_polyline", { points: [[1, 1]] }],
+  ["computer_polyline", { points: [[1, 1], [2, 2]], button: "лапа" }],
+  ["computer_read_screen", { title: "Microsoft", mode: "авто" }],
 ];
 for (const [n, a] of neg) {
   const t0 = Date.now();

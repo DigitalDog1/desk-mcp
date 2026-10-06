@@ -206,6 +206,29 @@ public class DemoForm : Form {
             Location = new Point(18, 34)
         };
         tabHistory.Controls.Add(hLbl);
+
+        // ListView в режиме Details, а не DataGridView. DataGridView отдаёт
+        // GridPattern через UIA только когда подсистема доступности
+        // инициализирована, а нативный список Windows отдаёт его всегда.
+        // Проверено: DataGridView в этом окне вернул "нет GridPattern".
+        var grid = new ListView();
+        grid.Name = "listScans";
+        grid.View = View.Details;
+        grid.FullRowSelect = true;
+        grid.GridLines = true;
+        grid.Location = new Point(14, 58);
+        grid.Size = new Size(360, 100);
+        grid.Columns.Add("Tracking", 110);
+        grid.Columns.Add("Status", 100);
+        grid.Columns.Add("Last scan", 100);
+        grid.Columns.Add("Depot", 90);
+        grid.Items.Add(new ListViewItem(new string[] { "ZX-4471-8820", "Out for delivery", "2026-10-05 18:12", "Brockhaven" }));
+        grid.Items.Add(new ListViewItem(new string[] { "ZX-1180-3395", "Delivered", "2026-10-04 09:41", "Riverton" }));
+        grid.Items.Add(new ListViewItem(new string[] { "ZX-9026-1147", "In depot", "2026-10-05 07:03", "Brockhaven" }));
+        grid.Items.Add(new ListViewItem(new string[] { "ZX-6633-2208", "Out for delivery", "2026-10-05 16:55", "Milvale" }));
+        grid.Items.Add(new ListViewItem(new string[] { "ZX-5519-7042", "Label created", "2026-10-03 21:20", "Riverton" }));
+        grid.Items.Add(new ListViewItem(new string[] { "ZX-2204-8817", "Out for delivery", "2026-10-05 19:02", "Milvale" }));
+        tabHistory.Controls.Add(grid);
         tabs.TabPages.Add(tabHistory);
 
         tabs.SelectedIndexChanged += (s, e) => Note("TAB:" + tabs.SelectedIndex);

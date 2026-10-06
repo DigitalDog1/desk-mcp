@@ -60,17 +60,17 @@ class Worker {
     // если powershell.exe не найден (битый PATH). Проверено ревьюером.
     proc.on("error", (e) => {
       process.stderr.write(`[worker] ошибка запуска: ${e.message}\n`);
-      this.#rejectAll(new Error(`Не удалось запустить PowerShell: ${e.message}`));
+      this.#rejectAll(errWith(`Не удалось запустить PowerShell: ${e.message}`, "NotSupported"));
     });
 
     proc.on("exit", (code, signal) => {
       if (this.proc !== proc) return;
       process.stderr.write(`[worker] вышел (code=${code}, signal=${signal ?? "-"})`);
-      this.#rejectAll(new Error("Воркер неожиданно завершился"));
+      this.#rejectAll(errWith("Воркер неожиданно завершился", "WorkerRestarted"));
     });
 
     this.readyPromise = new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("Воркер не поднялся за 25 с")), READY_TIMEOUT_MS);
+      const t = setTimeout(() => reject(errWith("Воркер не поднялся за 25 с", "WorkerRestarted")), READY_TIMEOUT_MS);
       this.#onReady = (data) => {
         clearTimeout(t);
         this.#onReady = null;
@@ -103,7 +103,15 @@ class Worker {
     this.pending.delete(msg.id);
     clearTimeout(entry.timer);
     if (msg.ok) entry.resolve(msg.data);
-    else entry.reject(new Error(msg.error || "Ошибка в воркере"));
+    else {
+      // Код ошибки рождается в PowerShell (Fail 'ElementNotFound' ...), но
+      // раньше он умирал здесь: агенту отдавался только текст, и машиночитаемой
+      // части отказа не существовало. Код переживает и обёртки PowerShell
+      // (там он дублируется в LastErrorCode), и эту границу тоже.
+      const err = new Error(msg.error || "Ошибка в воркере");
+      if (msg.code) err.code = msg.code;
+      entry.reject(err);
+    }
   }
 
   /**
@@ -164,7 +172,7 @@ class Worker {
     await this.ensure();
     const proc = this.proc;
     if (!this.alive) {
-      return Promise.reject(new Error("Воркер не запущен"));
+      return Promise.reject(errWith("Воркер не запущен", "WorkerRestarted"));
     }
     const id = this.nextId++;
     const payload = JSON.stringify({ id, tool, args: args ?? {} });
@@ -178,14 +186,14 @@ class Worker {
         // вызове, иначе канал мёртв до ручного рестарта.
         process.stderr.write(`[worker] '${tool}' не ответил за ${timeoutMs / 1000} с — воркер перезапускается\n`);
         this.kill();
-        reject(new Error(`Инструмент '${tool}' не ответил за ${timeoutMs / 1000} с; воркер перезапущен, повтори вызов`));
+        reject(errWith(`Инструмент '${tool}' не ответил за ${timeoutMs / 1000} с; воркер перезапущен, повтори вызов`, "WorkerRestarted"));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       proc.stdin.write(payload + "\n", (err) => {
         if (!err) return;
         this.pending.delete(id);
         clearTimeout(timer);
-        reject(new Error(`Запись в воркер не удалась: ${err.message}`));
+        reject(errWith(`Запись в воркер не удалась: ${err.message}`, "WorkerRestarted"));
       });
     });
   }
@@ -201,10 +209,22 @@ const worker = new Worker();
 worker.start();
 
 
+function errWith(message, code) {
+  const e = new Error(message);
+  if (code) e.code = code;
+  return e;
+}
 function fail(e) {
+  // Текст остаётся первым и без изменений: по нему агент понимает, что это
+  // отказ, а не данные. Код идёт второй строкой — человек его не читает,
+  // агент по нему различает «элемента нет» и «элемент есть, но недоступен».
+  const code = e?.code && typeof e.code === "string" ? e.code : "";
   return {
     isError: true,
-    content: [{ type: "text", text: `Ошибка: ${e?.message ?? e}` }],
+    content: [{
+      type: "text",
+      text: `Ошибка: ${e?.message ?? e}${code ? `\ncode: ${code}` : ""}`,
+    }],
   };
 }
 const R = (fn) => async (args) => {
@@ -755,6 +775,46 @@ server.registerTool(
 );
 
 server.registerTool(
+  "computer_read_table",
+  {
+    title: "Прочитать таблицу",
+    description: "Читает сетку, таблицу или список в режиме Details через нативные GridPattern " +
+      "и TablePattern: возвращает заголовки и строки, без OCR и без разбора картинки. " +
+      "Один вызов вместо перебора дерева или N*M поисков элементов. У паттерна нет признака " +
+      "\"эта строка заголовок\", поэтому первая строка читается как заголовок по соглашению, " +
+      "а не по гарантии Windows; отключается headers:false.",
+    inputSchema: {
+      title: z.string().optional().describe("подстрока заголовка окна"),
+      name: z.string().optional().describe("имя таблицы, подстрока"),
+      type: z.string().optional().describe("роль: DataGrid, Table, List..."),
+      id: z.string().optional().describe("automationId таблицы, самый надёжный признак"),
+      maxRows: z.number().int().min(1).max(2000).optional().default(200),
+      maxColumns: z.number().int().min(1).max(100).optional().default(50),
+      headers: z.boolean().optional().default(true)
+        .describe("первую строку считать заголовком и не включать её в rows"),
+      maxDepth: z.number().int().min(1).max(20).optional().default(8),
+    },
+  },
+  R(async (a) => ok(await callUi("read_table", a))),
+);
+
+server.registerTool(
+  "computer_polyline",
+  {
+    title: "Штрих по точкам",
+    description: "Рисует один непрерывный штрих по списку точек: нажатие в первой, обход всех " +
+      "вершин, отпускание в последней. N отдельных перетаскиваний поднимают ручку на каждой " +
+      "вершине, и вместо линии получается набор отдельных отрезков.",
+    inputSchema: {
+      points: z.array(z.tuple([z.number(), z.number()])).min(2).max(200)
+        .describe("вершины [[x,y], ...], минимум две"),
+      button: z.enum(["left", "right", "middle"]).optional().default("left"),
+    },
+  },
+  R(async (a) => ok(await callUi("polyline", a))),
+);
+
+server.registerTool(
   "computer_select_text",
   {
     title: "Выделить текст поля",
@@ -1270,7 +1330,7 @@ server.registerTool(
     const target = await cdp.pickTarget(a.url);
     const client = await cdp.socket(target);
     const raw = await cdp.evaluate(client, DESCENDANTS_JS(a.selector));
-    if (raw === "NULL") throw new Error(`Селектор не найден: ${a.selector}`);
+    if (raw === "NULL") throw errWith(`Селектор не найден: ${a.selector}`, "ElementNotFound");
     return ok({ url: target.url, ...JSON.parse(raw) });
   }),
 );
@@ -1327,7 +1387,7 @@ server.registerTool(
     } catch { /* браузер может быть в другой вкладке — не критично */ }
 
     let raw = await locate();
-    if (raw === "NULL") throw new Error(`Селектор не найден: ${a.selector}`);
+    if (raw === "NULL") throw errWith(`Селектор не найден: ${a.selector}`, "ElementNotFound");
     let BOX = JSON.parse(raw);
     await strike();
     await new Promise((r) => setTimeout(r, 350));
