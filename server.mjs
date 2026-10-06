@@ -357,6 +357,7 @@ reg(
     inputSchema: {
       region: z.string().optional().describe("'x,y,w,h'. Пусто — весь виртуальный экран"),
       window: z.string().optional().describe("снимок конкретного окна через PrintWindow"),
+      hwnd: z.number().int().optional().describe("дескриптор окна из computer_windows"),
       format: z.enum(["png", "jpeg"]).optional().default("png"),
       scale: z.number().min(0.1).max(2).optional().describe("1 = как есть, 0.5 = вдвое меньше"),
       quality: z.number().int().min(1).max(100).optional().default(80),
@@ -470,10 +471,16 @@ reg(
   {
     title: "Ввести текст",
     description:
-      "Печатает текст в то, что сейчас в фокусе, посимвольно через SendInput + KEYEVENTF_UNICODE. " +
-      "Кириллица работает, в отличие от SendKeys. Поле может содержать чужой черновик — " +
-      "этот инструмент его не чистит, сначала выдели всё (ctrl+a) и удали.",
-    inputSchema: { text: z.string() },
+      "Печатает текст в то, что сейчас в фокусе. inputMode: 'unicode' (посимвольный SendInput с KEYEVENTF_UNICODE, по умолчанию) " +
+      "или 'paste' (через системный буфер обмена и Ctrl+V — мгновенно для длинного текста и React/Electron). " +
+      "delayMs — задержка в миллисекундах между символами для unicode-режима.",
+    inputSchema: {
+      text: z.string(),
+      inputMode: z.enum(["unicode", "paste"]).optional().default("unicode")
+        .describe("способ ввода: посимвольный unicode через SendInput или быстрая вставка paste через буфер"),
+      delayMs: z.number().int().min(0).max(500).optional().default(0)
+        .describe("пауза в миллисекундах между символами для unicode-ввода"),
+    },
   },
   R(async (a) => ok(await worker.call("type", a))),
 );
@@ -521,7 +528,7 @@ reg(
 
 reg(
   "computer_close_window",
-  { title: "Закрыть окно", description: "Закрывает окно по подстроке заголовка. force — убить процесс. Требует confirm: true: действие разрушительное, а с force ещё и теряет несохранённые данные.", inputSchema: { title: z.string(), force: z.boolean().optional().default(false), confirm: z.boolean().optional() } },
+  { title: "Закрыть окно", description: "Закрывает окно по подстроке заголовка или hwnd. force — убить процесс. Требует confirm: true: действие разрушительное, а с force ещё и теряет несохранённые данные.", inputSchema: { title: z.string().optional(), hwnd: z.number().int().optional(), force: z.boolean().optional().default(false), confirm: z.boolean().optional() } },
   R(async (a) => ok(await worker.call("close_window", a))),
 );
 
@@ -544,6 +551,7 @@ reg(
       "interactiveOnly — оставить только кликабельное и вводимое.",
     inputSchema: {
       title: z.string().optional().describe("подстрока заголовка окна; пусто — все видимые"),
+      hwnd: z.number().int().optional().describe("дескриптор окна из computer_windows"),
       maxDepth: z.number().int().min(1).max(30).optional().default(6),
       maxElements: z.number().int().min(1).max(3000).optional().default(300),
       interactiveOnly: z.boolean().optional().default(false),
@@ -805,6 +813,8 @@ reg(
       title: z.string().optional().describe("подстрока заголовка окна; пусто — все видимые"),
       hwnd: z.number().int().optional().describe("дескриптор окна из computer_windows"),
       name: z.string().optional().describe("подстрока имени элемента"),
+      nameRegex: z.string().optional().describe("регулярное выражение для имени элемента (например, '^Кнопка' или '\\d+')"),
+      requireUnique: z.boolean().optional().default(false).describe("требовать ровно одно совпадение; при наличии дубликатов возвращает отказ AmbiguousMatch"),
       type: z.string().optional().describe("ControlType: Button, Edit, CheckBox, Hyperlink..."),
       id: z.string().optional().describe("точный AutomationId"),
       element: z.object({ name: z.string().optional(), type: z.string().optional(), id: z.string().optional(), rect: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional() }).optional()
@@ -842,9 +852,9 @@ reg(
   {
     title: "Записать значение поля",
     description:
-      "Ставит значение через UIA ValuePattern, без фокуса и без эмуляции клавиш. " +
-      "Не сработает там, где приложение держит значение только в своём обработчике — " +
-      "проверяй результат через computer_verify_state, а не по факту вызова.",
+      "Ставит значение поля. По умолчанию inputMode='value' через UIA ValuePattern (без фокуса и эмуляции клавиш). " +
+      "Для веб-форм, React и Electron, где ValuePattern не генерирует события ввода (onChange), " +
+      "поддерживаются inputMode='type' (фокус и посимвольный ввод) и inputMode='paste' (фокус и вставка из буфера).",
     inputSchema: {
       title: z.string().optional(), 
       hwnd: z.number().int().optional().describe("дескриптор окна из computer_windows"),
@@ -853,6 +863,8 @@ reg(
       type: z.string().optional(),
       id: z.string().optional(),
       value: z.string(),
+      inputMode: z.enum(["value", "type", "paste"]).optional().default("value")
+        .describe("способ ввода: 'value' (ValuePattern), 'type' (клавиатура SendInput), 'paste' (буфер обмена Ctrl+V)"),
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
@@ -892,7 +904,8 @@ reg(
       "\"эта строка заголовок\", поэтому первая строка читается как заголовок по соглашению, " +
       "а не по гарантии Windows; отключается headers:false.",
     inputSchema: {
-      title: z.string().optional().describe("подстрока заголовка окна (у живых окон меняется, тогда нужен hwnd)"), 
+      title: z.string().optional().describe("подстрока заголовка окна (у живых окон меняется, тогда нужен hwnd)"),
+      hwnd: z.number().int().optional().describe("дескриптор окна из computer_windows"),
       name: z.string().optional().describe("имя таблицы, подстрока"),
       type: z.string().optional().describe("роль: DataGrid, Table, List..."),
       id: z.string().optional().describe("automationId таблицы, самый надёжный признак"),
@@ -1024,7 +1037,8 @@ reg(
       "Таймаут возвращается как satisfied:false с reason:timeout, а не ошибкой: агент должен " +
       "отличать «не дождался» от «сломалось», и отсутствие элемента по таймауту ничего не доказывает.",
     inputSchema: {
-      title: z.string().optional().describe("подстрока заголовка окна (у живых окон меняется, тогда нужен hwnd)"), 
+      title: z.string().optional().describe("подстрока заголовка окна (у живых окон меняется, тогда нужен hwnd)"),
+      hwnd: z.number().int().optional().describe("дескриптор окна из computer_windows"),
       name: z.string().optional().describe("имя элемента, подстрока"),
       type: z.string().optional().describe("роль: Button, Edit, ListItem..."),
       id: z.string().optional().describe("automationId, самый надёжный признак"),

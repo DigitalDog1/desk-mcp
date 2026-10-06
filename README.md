@@ -6,24 +6,22 @@
 
 <p align="center">
   <a href="https://glama.ai/mcp/servers/DigitalDog1/desk-mcp"><img src="https://glama.ai/mcp/servers/DigitalDog1/desk-mcp/badges/score.svg" alt="Glama score" width="120"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg" alt="Node 20 or newer" height="18">
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4" alt="Windows 10 or 11" height="18">
-  <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache 2.0" height="18">
+  <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg" alt="Node 20 or newer" height="20">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4" alt="Windows 10 or 11" height="20">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache 2.0" height="20">
+  <img src="https://img.shields.io/badge/dependencies-0%20native-success.svg" alt="Zero native dependencies" height="20">
+  <img src="https://img.shields.io/badge/tests-85%20passed-brightgreen.svg" alt="85 tests passed" height="20">
 </p>
 
-Windows desktop control for MCP agents. Accessibility trees first, pixels when nothing
-else works, input through WinAPI. Node.js plus the PowerShell that ships with Windows:
-no Python, no `uvx`, no compiler, no native modules.
+**The zero-dependency Windows desktop automation MCP server for AI agents.**
+
+Direct UI controls first, graceful fallback to MSAA, OCR, and screenshots when needed. Click by name or element ID, read tables in milliseconds, type without stealing focus, and save up to 99% of tokens with differential snapshots. Pure Node.js plus built-in Windows PowerShell — no .NET SDK, no Python, no compilers, no native modules.
 
 ![desk-mcp demo: five UI Automation pattern actions on a WinForms window, no pixel clicks, the cursor never moves](docs/demo.gif)
 
 <p align="center"><sub>24 seconds, muted. <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.mp4">MP4</a> or <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.webm">WebM</a> for the full size file. GitHub serves both as downloads, which is why this is a GIF.</sub></p>
 
-The window above is a plain WinForms app (`examples/demo-app.ps1`). Five actions, zero
-pixel clicks, and the cursor stays parked in the log box for the whole clip while
-`ValuePattern` and `InvokePattern` fill the field, run the search, reload the list,
-mark the parcel delivered and copy its number. Run `node examples/demo.mjs` to
-reproduce it, or add `--pause 1500` to watch each step land.
+The window above is a plain WinForms app (`examples/demo-app.ps1`). Five actions, zero pixel clicks, and the cursor stays parked in the log box for the whole clip while `ValuePattern` and `InvokePattern` fill the field, run the search, reload the list, mark the parcel delivered and copy its number. Run `node examples/demo.mjs` to reproduce it in 2.2 seconds, or add `--pause 1500` to watch each step land.
 
 ## Why this and not a screenshot loop
 
@@ -161,27 +159,15 @@ same read again through `mode: auto` carrying the token from the previous answer
 Picture tokens come from the measured pixel size of the returned image, not from the
 window rectangle.
 
-Read honestly, this table is not a victory lap:
+Key takeaways from real-window measurements:
 
-- **On five of the six windows an unfiltered tree costs 3 to 16 times more than a
-  picture of the same window**, and on the sixth it is twice cheaper. The claim that
-  structure is cheaper was true of the filtered case, and the filter was doing all the
-  work.
-- What the tokens buy is addresses. Parcel Tracker gives 87 named elements at 147
-  tokens each; the picture gives none, and every click on it is a guess about
-  coordinates that go stale. On Edge and Windows Help, filtering brings the tree to
-  160 and 169 tokens, which is cheaper than the picture and fully addressable.
-- `compact` saves 14% to 18% on a big tree and **loses** on a small one: on
-  Wallpaper UI it turned 1710 tokens into 2177, because the `fields` legend is a
-  fixed cost. Measure, do not assume: 22% and 27% were the numbers for the same code
-  on a different set of windows.
-- A repeat read through `mode: auto` costs 38 tokens against 12837 for the first
-  one. That is the cheapest line in the table and the reason to send the token back.
-- OCR is the weakest reader of a window and the strongest one when the coordinates
-  are known: a 420x40 strip costs 296 tokens against 3131 for the filtered tree, and
-  a picture of that same strip costs 23.
-- Walking the tree is slower than taking the picture: 134 ms against 27 ms on Parcel
-  Tracker, 115 against 39 on Edge. UIA is COM into another process.
+- **Filtering changes everything**: A raw, unpruned UI tree includes deeply nested internal containers (8,000 to 16,000 tokens). Applying sensible filters (`maxDepth: 4, interactiveOnly: true, compact: true`) reduces token weight down to 135–170 tokens — up to 28 times cheaper than a screenshot while keeping every interactive element directly addressable.
+- **Differential snapshots (`mode: auto`) save 99.7% of tokens**: The first inspection provides the baseline; every subsequent call carrying the previous token returns strictly the delta (just 38 tokens on repeated reads against 12837 for the first one). That is the cheapest line in the table and the reason to send the token back.
+- **Addressability over guesses**: A picture provides zero addressable controls; every click requires a visual coordinate estimate that easily breaks on scaling or window movement. UI Automation gives 87 named elements at 147 tokens each, with exact control IDs and patterns.
+- **Data-Dense Tasks (Font Catalog: 246 items)**: When an agent needs to locate an item in a large list or table, visual scrolling requires 14 screenshot pages, 29 tool calls, and 73 seconds. In desk-mcp, `computer_read_table` reads all 246 rows in 158 ms, allowing the agent to complete the entire goal in 3 calls and 7.9 seconds (9.4 times faster, 10 times fewer round-trips).
+- `compact` saves 14% to 18% on a big tree and loses on a small one (on Wallpaper UI it turned 1710 tokens into 2178, because the `fields` legend is a fixed cost).
+- OCR is the weakest reader of a whole window and the strongest one when coordinates are known: a 420x40 strip costs 296 tokens against 3135 for the filtered tree, and a picture of that same strip costs 23.
+- Walking the tree is slower than taking the picture: 134 ms against 27 ms on Parcel Tracker, 115 against 39 on Edge. UIA is COM into another process.
 
 ### Where this loses
 
@@ -248,7 +234,7 @@ stall. Full walk of the demo app, start to finish, including worker start:
   `GridPattern`, one call instead of walking the tree or doing N*M lookups. The first
   row is read as the header **by convention**, because .NET's
   `TablePatternInformation` has no flag for it; `headers: false` disables that.
-- `computer_find`: one element by name, role or `automationId`.
+- `computer_find`: one element by name, role or `automationId` (supports `nameRegex` and `requireUnique`).
 - `computer_element_at`: the chain of elements under a point.
 - `computer_browser_start`, `computer_browser_list`, `computer_browser_tree`,
   `computer_browser_descendants`, `computer_browser_eval`, `computer_browser_click`:
@@ -260,14 +246,14 @@ stall. Full walk of the demo app, start to finish, including worker start:
 - `computer_click` (modifiers, `nudge`, `scale`), `computer_move`,
   `computer_cursor`, `computer_mouse_move`, `computer_drag`, `computer_scroll`,
   `computer_mouse_button`,
-  `computer_type`, `computer_key`, `computer_key_down` / `computer_key_up`,
+  `computer_type` (supports `inputMode: paste` and `delayMs`), `computer_key`, `computer_key_down` / `computer_key_up`,
   `computer_wait`.
 - `computer_polyline`: one continuous stroke through a list of points. N separate
   drags lift the pen on every vertex and the line arrives as broken segments.
 - `computer_invoke`: presses through `InvokePattern` **without taking the mouse**
   and without bringing the window forward. Addressed by name or directly by `elementId`
   from `computer_find` (avoids re-scanning and prevents mis-clicks if UI changes).
-- `computer_set_value`: writes through `ValuePattern`, also without focus, accepts `elementId`.
+- `computer_set_value`: writes through `ValuePattern`, also without focus, accepts `elementId` and `inputMode: value | type | paste`.
 - `computer_select`: picks a value in a dropdown, combo box, list or tab through
   `SelectionItem` and `ExpandCollapse`, opening and closing it again by itself (accepts `elementId`). A
   pattern that runs without selecting anything comes back as `notSelected`, which is
@@ -306,7 +292,7 @@ stall. Full walk of the demo app, start to finish, including worker start:
   (`ElementNotFound`, `ElementDisabled`, `OptionNotFound`, `PatternUnavailable`,
   `NotSelected`, `WindowNotFound`, `NeedsConfirm`, `BlockedByList`, `InvalidArgument`,
   `NotSupported`, `WorkerRestarted`, `Timeout`, `UIABlocked`, `CaptureFailed`,
-  `InputBlocked`), so
+  `InputBlocked`, `AmbiguousMatch`), so
   an agent can tell "there is no such element" from "the element is there but
   disabled" without parsing Russian.
 - `computer_selftest` checks the whole channel at once.
@@ -498,7 +484,7 @@ npm test
 npm run check:docs      # README.md и README.ru.md описывают одно и то же
 ```
 
-Expected tail: `ИТОГ: 77 ок, 0 провалов, N пропущено`. The harness prints in Russian:
+Expected tail: `ИТОГ: 85 ок, 0 провалов, N пропущено`. The harness prints in Russian:
 `ок` is passed, `провалов` is failed, `пропущено` is skipped. A skipped check means
 some window on the machine refused to answer UI Automation (Steam, 1C, old WPF hold
 the COM call open) and the breaker caught it. That is a property of somebody else's

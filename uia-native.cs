@@ -502,7 +502,7 @@ public static class UiaNative
         try
         {
             List<string> trees = new List<string>();
-            Counter last = new Counter();
+            Counter total = new Counter();
             CharBudget budget = new CharBudget();
             budget.Max = maxChars;
 
@@ -510,6 +510,7 @@ public static class UiaNative
 
             foreach (AutomationElement w in wins)
             {
+                if (total.Value >= maxElements) break;
                 try
                 {
                     if (!IsWindowVisible(new IntPtr(w.Current.NativeWindowHandle))) continue;
@@ -520,18 +521,16 @@ public static class UiaNative
                     continue;
                 }
 
-                Counter c = new Counter();
                 List<string> node = compact
-                    ? BuildNodesCompact(w, 0, maxDepth, c, maxElements, interactiveOnly, budget)
-                    : BuildNodes(w, 0, maxDepth, c, maxElements, interactiveOnly);
+                    ? BuildNodesCompact(w, 0, maxDepth, total, maxElements, interactiveOnly, budget)
+                    : BuildNodes(w, 0, maxDepth, total, maxElements, interactiveOnly);
                 if (!compact)
                 {
                     for (int i = 0; i < node.Count; i++)
                         budget.Spent(node[i].Length);
                 }
                 for (int i = 0; i < node.Count; i++) trees.Add(node[i]);
-                last = c;
-                if (budget.Hit) break;
+                if (budget.Hit || total.Value >= maxElements) break;
             }
 
             StringBuilder head = new StringBuilder(64);
@@ -547,10 +546,14 @@ public static class UiaNative
                 head.Append("{\"windows\":");
             }
             head.Append(JoinArray(trees));
-            head.Append(",\"elementsScanned\":").Append(Count(last.Value));
-            if (budget.Hit)
+            head.Append(",\"elementsScanned\":").Append(Count(total.Value));
+            if (total.Value >= maxElements)
             {
-                head.Append(",\"truncated\":true,\"maxChars\":").Append(Count(maxChars));
+                head.Append(",\"truncated\":true,\"truncatedReason\":\"maxElements\"");
+            }
+            else if (budget.Hit)
+            {
+                head.Append(",\"truncated\":true,\"truncatedReason\":\"maxChars\",\"maxChars\":").Append(Count(maxChars));
             }
             head.Append('}');
             return head.ToString();
@@ -997,7 +1000,8 @@ public static class UiaNative
     {
         try
         {
-            List<object[]> hits = SearchCore("", hwnd, nameLike, typeName, automationId, maxDepth, limit);
+            bool incomplete;
+            List<object[]> hits = SearchCore("", hwnd, nameLike, typeName, automationId, maxDepth, limit, out incomplete);
             if (hits.Count == 0) return "{\"status\":\"notfound\"}";
 
             if (action == "find")
@@ -1008,7 +1012,11 @@ public static class UiaNative
                     if (i > 0) items.Append(',');
                     items.Append(ElementInfoJson((AutomationElement)hits[i][0], (string)hits[i][1]));
                 }
-                return "{\"status\":\"ok\",\"count\":" + Count(hits.Count) + ",\"elements\":[" + items + "]}";
+                StringBuilder sb = new StringBuilder(256);
+                sb.Append("{\"status\":\"ok\",\"count\":").Append(Count(hits.Count));
+                if (incomplete) sb.Append(",\"searchIncomplete\":true");
+                sb.Append(",\"elements\":[").Append(items).Append("]}");
+                return sb.ToString();
             }
 
             AutomationElement el = (AutomationElement)hits[0][0];
@@ -1098,6 +1106,19 @@ public static class UiaNative
         if (action == "select")
         {
             return SelectJson(el, ct, info, value);
+        }
+
+        if (action == "focus")
+        {
+            try
+            {
+                el.SetFocus();
+                return "{\"status\":\"ok\",\"via\":\"SetFocus\",\"element\":" + info + "}";
+            }
+            catch (Exception ex)
+            {
+                return "{\"status\":\"error\",\"error\":" + J(ex.Message) + ",\"element\":" + info + "}";
+            }
         }
 
         return "{\"status\":\"unknownAction\",\"error\":" + J(action) + "}";
@@ -1481,19 +1502,46 @@ public static class UiaNative
     private static List<object[]> SearchCore(string titleLike, string nameLike, string typeName,
                                              string automationId, int maxDepth, int limit)
     {
-        return SearchCore(titleLike, 0, nameLike, typeName, automationId, maxDepth, limit);
+        bool inc;
+        return SearchCore(titleLike, 0, nameLike, typeName, automationId, maxDepth, limit, out inc);
     }
 
     private static List<object[]> SearchCore(string titleLike, long hwnd, string nameLike, string typeName,
                                              string automationId, int maxDepth, int limit)
     {
+        bool inc;
+        return SearchCore(titleLike, hwnd, nameLike, typeName, automationId, maxDepth, limit, out inc);
+    }
+
+    private static List<object[]> SearchCore(string titleLike, long hwnd, string nameLike, string typeName,
+                                             string automationId, int maxDepth, int limit, out bool incomplete)
+    {
+        incomplete = false;
         List<object[]> hits = new List<object[]>();
 
         List<AutomationElement> wins = WindowList(titleLike, hwnd);
 
+        System.Text.RegularExpressions.Regex rx = null;
+        if (!IsBlank(nameLike) && nameLike.Length >= 2 && nameLike.StartsWith("/") && nameLike.EndsWith("/"))
+        {
+            string pat = nameLike.Substring(1, nameLike.Length - 2);
+            try
+            {
+                rx = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+            catch (Exception)
+            {
+                rx = null;
+            }
+        }
+
         foreach (AutomationElement w in wins)
         {
-            if (hits.Count >= limit) break;
+            if (hits.Count >= limit)
+            {
+                incomplete = true;
+                break;
+            }
             try
             {
                 if (!IsWindowVisible(new IntPtr(w.Current.NativeWindowHandle))) continue;
@@ -1516,14 +1564,27 @@ public static class UiaNative
 
                 if (depth > maxDepth) continue;
                 scanned++;
-                if (scanned > ScanBudget) break;
+                if (scanned > ScanBudget)
+                {
+                    incomplete = true;
+                    break;
+                }
 
                 try
                 {
                     AutomationElement.AutomationElementInformation info = el.Current;
                     string ct = TypeShort(info.ControlType);
 
-                    bool okName = IsBlank(nameLike) || Contains(info.Name, nameLike);
+                    bool okName = true;
+                    if (rx != null)
+                    {
+                        okName = rx.IsMatch(info.Name ?? "");
+                    }
+                    else if (!IsBlank(nameLike))
+                    {
+                        okName = Contains(info.Name, nameLike);
+                    }
+
                     bool okType = IsBlank(typeName) ||
                                   string.Equals(ct, typeName, StringComparison.OrdinalIgnoreCase) ||
                                   Contains(ct, typeName);
@@ -1544,6 +1605,7 @@ public static class UiaNative
                 {
                 }
             }
+            if (stack.Count > 0 && hits.Count >= limit) incomplete = true;
         }
 
         return hits;

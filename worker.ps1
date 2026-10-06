@@ -178,6 +178,7 @@ public class DeskMcp {
     // 3.0-3.2 с. EnumWindows занимает микросекунды и не ходит в COM.
     public delegate bool EnumWindowsProc(IntPtr h, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l);
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW")]
     public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder sb, int max);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")]
@@ -190,6 +191,25 @@ public class DeskMcp {
         public int Pid;
         public bool Visible;
         public int X, Y, W, H;
+    }
+
+    public static WinInfo GetWindowInfo(IntPtr h) {
+        if (h == IntPtr.Zero || !IsWindow(h)) return null;
+        var sbT = new System.Text.StringBuilder(512);
+        var sbC = new System.Text.StringBuilder(256);
+        GetWindowTextW(h, sbT, sbT.Capacity);
+        GetClassNameW(h, sbC, sbC.Capacity);
+        RECT rr;
+        bool hasRect = GetWindowRect(h, out rr);
+        int ww = hasRect ? rr.Right - rr.Left : 0;
+        int hh = hasRect ? rr.Bottom - rr.Top : 0;
+        int pid;
+        GetWindowThreadProcessIdPid(h, out pid);
+        return new WinInfo {
+            Handle = h, Title = sbT.ToString(), Class = sbC.ToString(),
+            Pid = pid, Visible = IsWindowVisible(h),
+            X = rr.Left, Y = rr.Top, W = ww, H = hh
+        };
     }
 
     public static System.Collections.Generic.List<WinInfo> EnumTopWindows() {
@@ -666,8 +686,17 @@ function Invoke-UiAct([string]$action, $a, [int]$depth, [int]$limit) {
         }
         $hwnd = Get-TargetHwnd $a
         if ($hwnd -eq 0) { return $null }
+        $searchName = if ($a -and $a.nameRegex) {
+            if ("$($a.nameRegex)".StartsWith('/') -and "$($a.nameRegex)".EndsWith('/')) {
+                [string]$a.nameRegex
+            } else {
+                "/$($a.nameRegex)/"
+            }
+        } elseif ($a) {
+            [string]$a.name
+        } else { '' }
         $argv = @(
-            [int]$script:UiaBudgetMs, $hwnd, $action, [string]$a.name, [string]$a.type,
+            [int]$script:UiaBudgetMs, $hwnd, $action, $searchName, [string]$a.type,
             [string]$a.id, [int]$depth, [string]$a.value, [int]$limit
         )
         return (Invoke-UiaNative 'RunActByHwnd' $argv | ConvertFrom-Json)
@@ -1065,11 +1094,27 @@ function Find-WindowByTitle([string]$like, [int]$timeoutSec, [long]$hwnd = 0) {
     # Дескриптор важнее заголовка: заголовок живого окна меняется сам, и вызов
     # со старым заголовком либо промахивается, либо цепляет другое окно.
     $deadline = (Get-Date).AddSeconds($timeoutSec)
+    if ($hwnd -gt 0) {
+        while ($true) {
+            $w = [DeskMcp]::GetWindowInfo([IntPtr]$hwnd)
+            if ($w) {
+                return [ordered]@{
+                    title   = $w.Title
+                    hwnd    = [long]$w.Handle.ToInt64()
+                    process = $w.Pid
+                    class   = $w.Class
+                    rect    = [ordered]@{ x = $w.X; y = $w.Y; w = $w.W; h = $w.H }
+                    visible = $w.Visible
+                }
+            }
+            if ((Get-Date) -ge $deadline) { return $null }
+            Start-Sleep -Milliseconds 100
+        }
+    }
     $pat = "*$(Escape-Like $like)*"
     while ($true) {
         foreach ($w in [DeskMcp]::EnumTopWindows()) {
-            $byHandle = ($hwnd -gt 0) -and ([long]$w.Handle.ToInt64() -eq $hwnd)
-            if ($byHandle -or ($hwnd -le 0 -and $w.Visible -and $w.Title -like $pat)) {
+            if ($w.Visible -and $w.Title -like $pat) {
                 return [ordered]@{
                     title   = $w.Title
                     hwnd    = [long]$w.Handle.ToInt64()
@@ -1492,17 +1537,31 @@ function Get-UiNodes($el, [int]$depth, [int]$maxDepth, [ref]$counter, [int]$maxE
 function Search-UiElements {
     param(
         [string]$TitleLike, [string]$NameLike, [string]$TypeName,
-        [string]$AutomationId, [int]$MaxDepth, [int]$Limit
+        [string]$AutomationId, [int]$MaxDepth, [int]$Limit, [long]$Hwnd = 0
     )
     $hits = @()
-    $root = [System.Windows.Automation.AutomationElement]::RootElement
-    $cond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::Window)
-    foreach ($w in $root.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)) {
+    $targets = @()
+    if ($Hwnd -gt 0) {
+        try {
+            $w = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Hwnd)
+            if ($w) { $targets = @($w) }
+        } catch { $targets = @() }
+    } else {
+        $root = [System.Windows.Automation.AutomationElement]::RootElement
+        $cond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Window)
+        foreach ($w in $root.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)) {
+            try {
+                if (-not [DeskMcp]::IsWindowVisible([IntPtr]$w.Current.NativeWindowHandle)) { continue }
+                if ($TitleLike -ne '' -and $w.Current.Name -notlike "*$(Escape-Like $TitleLike)*") { continue }
+                $targets += $w
+            } catch { continue }
+        }
+    }
+    foreach ($w in $targets) {
         try {
             if (-not [DeskMcp]::IsWindowVisible([IntPtr]$w.Current.NativeWindowHandle)) { continue }
-            if ($TitleLike -ne '' -and $w.Current.Name -notlike "*$(Escape-Like $TitleLike)*") { continue }
         } catch { continue }
         $counter = 0
         $stack = New-Object System.Collections.Stack
@@ -1519,18 +1578,18 @@ function Search-UiElements {
             try {
                 $c = $el.Current
                 $ct = $c.ControlType.ProgrammaticName -replace '^ControlType\.', ''
-                $okName = ($NameLike -eq '') -or ($c.Name -like "*$(Escape-Like $NameLike)*")
+                $isRx = $NameLike.Length -ge 2 -and $NameLike.StartsWith('/') -and $NameLike.EndsWith('/')
+                $okName = if ($isRx) {
+                    try { [string]$c.Name -match $NameLike.Substring(1, $NameLike.Length - 2) } catch { $false }
+                } else {
+                    ($NameLike -eq '') -or ($c.Name -like "*$(Escape-Like $NameLike)*")
+                }
                 $okType = ($TypeName -eq '') -or ($ct -eq $TypeName) -or ($ct -like "*$(Escape-Like $TypeName)*")
                 $okId = ($AutomationId -eq '') -or ($c.AutomationId -eq $AutomationId)
                 if ($okName -and $okType -and $okId) { $hits += ,@($el, $ct) }
                 $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
                 $ch = $walker.GetFirstChild($el)
                 while ($ch -ne $null) {
-                    # Пара элемент+глубина собирается через object[] намеренно:
-                    # написанная как @($ch, $depth + 1) пара разбирается
-                    # PowerShell как ($ch, $depth) + 1 и даёт массив из трёх
-                    # элементов, из-за чего глубина всегда была 0 и maxDepth
-                    # не ограничивал обход ни разу.
                     $pair = New-Object object[] 2
                     $pair[0] = $ch
                     $pair[1] = $depth + 1
@@ -1555,13 +1614,14 @@ function Resolve-Target($a) {
     $type = [string]$a.type
     $id = [string]$a.id
     $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
+    $hw = if ($a.hwnd) { [long]$a.hwnd } else { 0 }
     $el = $a.element
     if ($el) {
         if (-not $name -and $el['name']) { $name = [string]$el['name'] }
         if (-not $type -and $el['type']) { $type = [string]$el['type'] }
         if (-not $id   -and $el['id'])   { $id   = [string]$el['id'] }
     }
-    $hits = Search-UiElements $title $name $type $id $depth 1
+    $hits = Search-UiElements $title $name $type $id $depth 1 $hw
     if (@($hits).Count -eq 0 -and $el -and $el['rect']) {
         # Имя могло смениться (счётчик, «2 элемента выбрано»). Пробуем по роли
         # и по координате внутри кэшированного прямоугольника.
@@ -1675,9 +1735,7 @@ function Find-WindowHwnd([string]$title, [long]$hwnd = 0) {
     # ставит звёздочку несохранённого, приложение дописывает состояние. Окно,
     # найденное один раз по заголовку, через минуту может перестать находиться.
     if ($hwnd -gt 0) {
-        foreach ($w in [DeskMcp]::EnumTopWindows()) {
-            if ([long]$w.Handle.ToInt64() -eq $hwnd) { return $hwnd }
-        }
+        if ([DeskMcp]::IsWindow([IntPtr]$hwnd)) { return $hwnd }
         return [long]0
     }
     # HWND верхнеуровневого окна по подстроке заголовка, через user32.
@@ -1732,8 +1790,10 @@ function Get-UiTree([string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool
         if ($o.fields) { $res['fields'] = @($o.fields) }
         if ($o.truncated) {
             $res['truncated'] = $true
-            $res['maxChars'] = [int]$o.maxChars
-            $res['note'] = "Дерево обрезано по maxChars. Для точечного доступа зови computer_find по имени или automationId."
+            if ($o.truncatedReason) { $res['truncatedReason'] = [string]$o.truncatedReason }
+            if ($o.maxChars) { $res['maxChars'] = [int]$o.maxChars }
+            $reason = if ($o.truncatedReason) { [string]$o.truncatedReason } else { "maxChars" }
+            $res['note'] = "Дерево обрезано по $reason. Для точечного доступа зови computer_find по имени или automationId."
         }
         return $res
     }
@@ -1785,7 +1845,7 @@ function Get-ElementAt([int]$x, [int]$y) {
 
 
 function Save-Screenshot {
-    param([string]$Region, [int]$Display, [double]$Scale, [string]$Format, [int]$Quality, [string]$WindowTitle)
+    param([string]$Region, [int]$Display, [double]$Scale, [string]$Format, [int]$Quality, [string]$WindowTitle, [long]$Hwnd = 0)
     $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
     $x = $vs.Left; $y = $vs.Top; $w = $vs.Width; $h = $vs.Height
     if ($Region) {
@@ -1798,9 +1858,9 @@ function Save-Screenshot {
     $bmp = $null; $g = $null; $g2 = $null; $out = $null; $ms = $null; $ep = $null
     $via = 'screen'
     try {
-        if ($WindowTitle) {
-            $win = Find-WindowByTitle $WindowTitle 3
-            if (-not $win) { Fail 'WindowNotFound' "Окно '*$WindowTitle*' не найдено за 3 с" }
+        if ($WindowTitle -or $Hwnd -gt 0) {
+            $win = Find-WindowByTitle $WindowTitle 3 $Hwnd
+            if (-not $win) { Fail 'WindowNotFound' "Окно '$(if ($WindowTitle) { "*$WindowTitle*" } else { "hwnd $Hwnd" })' не найдено за 3 с" }
             $targetHwnd = [IntPtr]$win.hwnd
             if ($targetHwnd -eq [IntPtr]::Zero -and $win.process) {
                 try { $targetHwnd = (Get-Process -Id $win.process).MainWindowHandle } catch { }
@@ -1915,7 +1975,8 @@ function Invoke-Tool {
                 $result = Save-Screenshot -Region $a.region -Display $a.display `
                                         -Scale $(if ($a.scale) { [double]$a.scale } else { 0 }) `
                                         -Format $fmt -Quality $(if ($a.quality) { [int]$a.quality } else { 80 }) `
-                                        -WindowTitle ([string]$a.window)
+                                        -WindowTitle ([string]$a.window) `
+                                        -Hwnd (Get-ArgHwnd $a)
             }
 
             'bench' {
@@ -2192,11 +2253,32 @@ function Invoke-Tool {
 
             'type' {
                 $txt = [string]$a.text
-                $n = [DeskMcp]::TypeUnicode($txt)
-                if ($txt.Length -gt 0 -and $n -ne $txt.Length * 2) {
-                    Fail 'InputBlocked' "SendInput принял $n событий из $($txt.Length * 2) — ввод заблокирован (UIPI?)"
+                $mode = if ($a.inputMode) { [string]$a.inputMode } else { 'unicode' }
+                $delay = if ($a.delayMs) { [int]$a.delayMs } else { 0 }
+                if ($mode -eq 'paste') {
+                    Set-Clipboard -Value $txt
+                    $null = [DeskMcp]::VKey(0x11, $false)
+                    $null = [DeskMcp]::VKey(0x56, $false)
+                    Start-Sleep -Milliseconds 30
+                    $null = [DeskMcp]::VKey(0x56, $true)
+                    $null = [DeskMcp]::VKey(0x11, $true)
+                    $result = [ordered]@{ ok = $true; mode = 'paste'; chars = $txt.Length }
+                } else {
+                    $n = if ($delay -gt 0) {
+                        $sent = 0
+                        foreach ($ch in $txt.ToCharArray()) {
+                            $sent += [DeskMcp]::TypeUnicode([string]$ch)
+                            Start-Sleep -Milliseconds $delay
+                        }
+                        $sent
+                    } else {
+                        [DeskMcp]::TypeUnicode($txt)
+                    }
+                    if ($txt.Length -gt 0 -and $n -ne $txt.Length * 2) {
+                        Fail 'InputBlocked' "SendInput принял $n событий из $($txt.Length * 2) — ввод заблокирован (UIPI?)"
+                    }
+                    $result = [ordered]@{ ok = $true; mode = 'unicode'; chars = $txt.Length; events = $n }
                 }
-                $result = [ordered]@{ ok = $true; chars = $txt.Length; events = $n }
             }
 
             'key' {
@@ -2316,9 +2398,9 @@ function Invoke-Tool {
                     $uia = Get-UiTree $title $md $me $io $compact $maxChars $winHwnd
                     # В компактном виде узлы это массивы, поля name у них нет,
                     # поэтому критерий "дерево содержательное" считаем по
-                    # числу просмотренных элементов, а не по именам.
-                    $uiaUseful = if ($compact) { [int]$uia.elementsScanned -ge 5 }
-                                 else { (Count-NamedUiInside $uia.windows) -ge 5 }
+                    $minUseful = [Math]::Min(5, $me)
+                    $uiaUseful = if ($compact) { [int]$uia.elementsScanned -ge $minUseful }
+                                 else { (Count-NamedUiInside $uia.windows) -ge $minUseful }
                     if ($backend -eq 'uia' -or $uiaUseful) {
                         if ($mode -eq 'full') {
                             $uia['backend'] = 'uia'
@@ -2469,21 +2551,43 @@ function Invoke-Tool {
             }
 
             'find' {
-                $key = "find|$([string]$a.title)|$([string]$a.name)|$([string]$a.type)|$([string]$a.id)|$([string]$a.maxDepth)|$([string]$a.limit)"
+                $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
+                $limit = if ($a.limit) { [int]$a.limit } else { 20 }
+                $reqUnique = if ($a.requireUnique) { [bool]$a.requireUnique } else { $false }
+                $searchName = if ($a.nameRegex) {
+                    if ("$($a.nameRegex)".StartsWith('/') -and "$($a.nameRegex)".EndsWith('/')) {
+                        [string]$a.nameRegex
+                    } else {
+                        "/$($a.nameRegex)/"
+                    }
+                } else {
+                    [string]$a.name
+                }
+                $hw = if ($a.hwnd) { [long]$a.hwnd } else { 0 }
+                $key = "find|$([string]$a.title)|$hw|$searchName|$([string]$a.type)|$([string]$a.id)|$depth|$limit|$reqUnique"
                 $result = Get-UiCached $key {
-                    $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
-                    $limit = if ($a.limit) { [int]$a.limit } else { 20 }
                     # STA-путь: поиск на STA-потоке, без PowerShell в UIA.
                     $nat = Invoke-UiAct 'find' $a $depth $limit
                     if ($nat -and $nat.status -eq 'ok') {
-                        return [ordered]@{ count = [int]$nat.count; elements = @($nat.elements) }
+                        $cnt = [int]$nat.count
+                        if ($reqUnique -and $cnt -gt 1) {
+                            Fail 'AmbiguousMatch' "Найдено $cnt элементов, ожидался ровно один (requireUnique=true)"
+                        }
+                        $res = [ordered]@{ count = $cnt; elements = @($nat.elements) }
+                        if ($nat.searchIncomplete) { $res['searchIncomplete'] = $true }
+                        return $res
                     }
-                    $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
-                                           ([string]$a.id) $depth $limit
+                    $hits = Search-UiElements ([string]$a.title) $searchName ([string]$a.type) `
+                                           ([string]$a.id) $depth $limit $hw
                     if (@($hits).Count -eq 0) { Fail 'ElementNotFound' "Не найдено ни одного элемента по заданным условиям" }
+                    if ($reqUnique -and @($hits).Count -gt 1) {
+                        Fail 'AmbiguousMatch' "Найдено $(@($hits).Count) элементов, ожидался ровно один (requireUnique=true)"
+                    }
                     $items = @()
                     foreach ($h in $hits) { $items += ,(Convert-ElementInfo $h) }
-                    [ordered]@{ count = $items.Count; elements = $items }
+                    $res = [ordered]@{ count = $items.Count; elements = $items }
+                    if (@($hits).Count -ge $limit) { $res['searchIncomplete'] = $true }
+                    return $res
                 }
             }
 
@@ -2499,6 +2603,9 @@ function Invoke-Tool {
                     }
                     if ($nat.status -eq 'stale' -or $nat.status -eq 'notFound') {
                         Fail 'ElementNotFound' "$($nat.error)"
+                    }
+                    if ($nat.status -eq 'noPattern' -and $a.elementId) {
+                        Fail 'PatternUnavailable' "Элемент '$($nat.element.name)' не поддерживает нажатие (нет InvokePattern)"
                     }
                     if ($nat.status -eq 'ok') {
                         $result = [ordered]@{ ok = $true; via = $nat.via; element = $nat.element }
@@ -2547,36 +2654,113 @@ function Invoke-Tool {
 
             'set_value' {
                 $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
-                $nat = Invoke-UiAct 'set_value' $a $depth 1
-                if ($nat) {
-                    if ($nat.status -eq 'disabled') {
-                        Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
+                $mode = if ($a.inputMode) { [string]$a.inputMode } else { 'value' }
+                $val = [string]$a.value
+
+                if ($mode -eq 'value') {
+                    $nat = Invoke-UiAct 'set_value' $a $depth 1
+                    if ($nat) {
+                        if ($nat.status -eq 'disabled') {
+                            Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
+                        }
+                        if ($nat.status -eq 'stale' -or $nat.status -eq 'notFound') {
+                            Fail 'ElementNotFound' "$($nat.error)"
+                        }
+                        if ($nat.status -eq 'noPattern' -and $a.elementId) {
+                            Fail 'PatternUnavailable' "Элемент '$($nat.element.name)' не поддерживает запись (нет ValuePattern)"
+                        }
+                        if ($nat.status -eq 'ok') {
+                            $result = [ordered]@{ ok = $true; via = $nat.via; value = $val; element = $nat.element }
+                            break
+                        }
+                        # notfound уходит в фоллбэк по той же причине, что и в invoke.
                     }
-                    if ($nat.status -eq 'stale' -or $nat.status -eq 'notFound') {
-                        Fail 'ElementNotFound' "$($nat.error)"
+                    if ($a -and $null -ne $a.elementId -and "$($a.elementId)".Trim() -ne '') {
+                        Fail 'ElementNotFound' "Элемент '$($a.elementId)' не найден или больше недоступен"
                     }
-                    if ($nat.status -eq 'ok') {
-                        $result = [ordered]@{ ok = $true; via = $nat.via; value = [string]$a.value; element = $nat.element }
-                        break
+                    $hits = Resolve-Target $a
+                    if (@($hits).Count -eq 0) { Fail 'ElementNotFound' "Элемент '$($a.name)' не найден" }
+                    $el = @($hits)[0][0]
+                    $info = Convert-ElementInfo @($hits)[0]
+                    if ($info['enabled'] -eq $false) {
+                        Fail 'ElementDisabled' "Элемент '$($info['name'])' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
                     }
-                    # notfound уходит в фоллбэк по той же причине, что и в invoke.
-                }
-                if ($a -and $null -ne $a.elementId -and "$($a.elementId)".Trim() -ne '') {
-                    Fail 'ElementNotFound' "Элемент '$($a.elementId)' не найден или больше недоступен"
-                }
-                $hits = Resolve-Target $a
-                if (@($hits).Count -eq 0) { Fail 'ElementNotFound' "Элемент '$($a.name)' не найден" }
-                $el = @($hits)[0][0]
-                $info = Convert-ElementInfo @($hits)[0]
-                if ($info['enabled'] -eq $false) {
-                    Fail 'ElementDisabled' "Элемент '$($info['name'])' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
-                }
-                try {
-                    $vp = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                    $vp.SetValue([string]$a.value)
-                    $result = [ordered]@{ ok = $true; via = 'ValuePattern'; value = [string]$a.value; element = $info }
-                } catch {
-                    Fail 'PatternUnavailable' "У элемента нет доступного для записи ValuePattern: $($_.Exception.Message)"
+                    try {
+                        $vp = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                        $vp.SetValue($val)
+                        $result = [ordered]@{ ok = $true; via = 'ValuePattern'; value = $val; element = $info }
+                    } catch {
+                        Fail 'PatternUnavailable' "У элемента нет доступного для записи ValuePattern: $($_.Exception.Message)"
+                    }
+                } else {
+                    $targetInfo = $null
+                    $focused = $false
+                    if ($script:NativeUia) {
+                        $foc = Invoke-UiAct 'focus' $a $depth 1
+                        if ($foc -and $foc.status -eq 'disabled') {
+                            Fail 'ElementDisabled' "Элемент '$($foc.element.name)' неактивен (enabled=false): поле отключено приложением, ввод не пройдёт."
+                        }
+                        if ($foc -and $foc.status -eq 'stale') {
+                            Fail 'ElementNotFound' "$($foc.error)"
+                        }
+                        if ($foc -and $foc.status -eq 'ok') {
+                            $focused = $true
+                            $targetInfo = $foc.element
+                        }
+                    }
+                    if (-not $focused) {
+                        if ($a -and $null -ne $a.elementId -and "$($a.elementId)".Trim() -ne '') {
+                            Fail 'ElementNotFound' "Элемент '$($a.elementId)' не найден или больше недоступен"
+                        }
+                        $hits = Resolve-Target $a
+                        if (@($hits).Count -eq 0) { Fail 'ElementNotFound' "Элемент '$($a.name)' не найден" }
+                        $el = @($hits)[0][0]
+                        $targetInfo = Convert-ElementInfo @($hits)[0]
+                        if ($targetInfo['enabled'] -eq $false) {
+                            Fail 'ElementDisabled' "Элемент '$($targetInfo['name'])' неактивен (enabled=false): поле отключено приложением, ввод не пройдёт."
+                        }
+                        try {
+                            $el.SetFocus()
+                            $focused = $true
+                            Start-Sleep -Milliseconds 40
+                        } catch {
+                            $r = $targetInfo['rect']
+                            if ($r['w'] -gt 0 -and $r['h'] -gt 0) {
+                                $cx = $r['x'] + [int]($r['w'] / 2)
+                                $cy = $r['y'] + [int]($r['h'] / 2)
+                                [DeskMcp]::MoveTo($cx, $cy)
+                                Start-Sleep -Milliseconds 60
+                                [DeskMcp]::Click('left', 1)
+                                $focused = $true
+                                Start-Sleep -Milliseconds 60
+                            }
+                        }
+                    }
+                    Start-Sleep -Milliseconds 30
+                    $null = [DeskMcp]::VKey(0x11, $false)
+                    $null = [DeskMcp]::VKey(0x41, $false)
+                    Start-Sleep -Milliseconds 20
+                    $null = [DeskMcp]::VKey(0x41, $true)
+                    $null = [DeskMcp]::VKey(0x11, $true)
+                    Start-Sleep -Milliseconds 20
+                    $null = [DeskMcp]::VKey(0x08, $false)
+                    Start-Sleep -Milliseconds 20
+                    $null = [DeskMcp]::VKey(0x08, $true)
+                    Start-Sleep -Milliseconds 40
+
+                    if ($mode -eq 'paste') {
+                        Set-Clipboard -Value $val
+                        Start-Sleep -Milliseconds 40
+                        $null = [DeskMcp]::VKey(0x11, $false)
+                        $null = [DeskMcp]::VKey(0x56, $false)
+                        Start-Sleep -Milliseconds 30
+                        $null = [DeskMcp]::VKey(0x56, $true)
+                        $null = [DeskMcp]::VKey(0x11, $true)
+                        $result = [ordered]@{ ok = $true; via = 'paste'; value = $val; element = $targetInfo }
+                    } else {
+                        $n = [DeskMcp]::TypeUnicode($val)
+                        $result = [ordered]@{ ok = $true; via = 'type'; value = $val; chars = $val.Length; events = $n; element = $targetInfo }
+                    }
                 }
             }
 

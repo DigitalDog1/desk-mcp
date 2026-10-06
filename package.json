@@ -44,6 +44,7 @@
     "check": "node --check server.mjs",
     "bench": "node bench-tokens.mjs",
     "bench:full": "node bench-full.mjs",
+    "bench:fonts": "node bench-fonts.mjs",
     "check:docs": "node check-docs.mjs"
   },
   "dependencies": {

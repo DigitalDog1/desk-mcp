@@ -624,6 +624,71 @@ console.log("== пачка подставляет значение из пред
   }
 }
 
+console.log("== поиск по регулярному выражению и requireUnique ==");
+{
+  const rxRes = await call("computer_find", { hwnd: withHwnd?.hwnd, nameRegex: ".+", limit: 5 });
+  const rxParsed = JSON.parse(rxRes.content?.[0]?.text ?? "{}");
+  const okRx = rxParsed.status === "ok" || (rxParsed.elements && rxParsed.elements.length > 0);
+  if (okRx) {
+    pass++;
+    console.log(`  ОК   nameRegex нашёл ${rxParsed.elements?.length} элементов по шаблону '.+'`);
+  } else {
+    fail++;
+    console.log(`  СБОЙ nameRegex: ${rxRes.content?.[0]?.text?.slice(0, 100)}`);
+  }
+
+  const ambRes = await call("computer_find", { hwnd: withHwnd?.hwnd, nameRegex: ".+", limit: 5, requireUnique: true });
+  const ambTxt = ambRes.content?.[0]?.text ?? "";
+  const okAmb = ambTxt.includes("AmbiguousMatch");
+  if (okAmb) {
+    pass++;
+    console.log("  ОК   requireUnique:true вернул AmbiguousMatch при множественных совпадениях");
+  } else {
+    fail++;
+    console.log(`  СБОЙ requireUnique: ${ambTxt.slice(0, 100)}`);
+  }
+}
+
+console.log("== частичные ответы: truncatedReason и searchIncomplete ==");
+{
+  const uiaWin = (winListH.windows ?? []).find((w) => w.hwnd && w.visible && w.rect.w > 200 && w.rect.x > -1000 && /Font Catalog|Edge|LibreOffice|Parcel Tracker|Explorer/i.test(w.title)) ?? withHwnd;
+  const truncRes = await call("computer_read_screen", { hwnd: uiaWin?.hwnd, maxElements: 10 });
+  const truncParsed = JSON.parse(truncRes.content?.[0]?.text ?? "{}");
+  const okTrunc = truncParsed.truncated === true && truncParsed.truncatedReason === "maxElements";
+  if (okTrunc) {
+    pass++;
+    console.log("  ОК   computer_read_screen вернул truncated=true и truncatedReason=maxElements");
+  } else {
+    fail++;
+    console.log(`  СБОЙ truncated: ${JSON.stringify(truncParsed).slice(0, 100)}`);
+  }
+
+  const incRes = await call("computer_find", { hwnd: withHwnd?.hwnd, limit: 1 });
+  const incParsed = JSON.parse(incRes.content?.[0]?.text ?? "{}");
+  const okInc = incParsed.searchIncomplete === true;
+  if (okInc) {
+    pass++;
+    console.log("  ОК   computer_find вернул searchIncomplete=true при исчерпании лимита");
+  } else {
+    fail++;
+    console.log(`  СБОЙ searchIncomplete: ${incRes.content?.[0]?.text?.slice(0, 100)}`);
+  }
+}
+
+console.log("== режимы ввода inputMode ==");
+{
+  const tp = await call("computer_type", { text: "desk-mcp-smoke", inputMode: "paste" });
+  const tpParsed = JSON.parse(tp.content?.[0]?.text ?? "{}");
+  const okTp = tpParsed.ok === true && tpParsed.mode === "paste";
+  if (okTp) {
+    pass++;
+    console.log("  ОК   computer_type отработал в режиме inputMode=paste");
+  } else {
+    fail++;
+    console.log(`  СБОЙ computer_type paste: ${tp.content?.[0]?.text?.slice(0, 100)}`);
+  }
+}
+
 console.log("== два README описывают одно и то же ==");
 {
   const r = spawnSync(process.execPath, [path.join(__dirname, "check-docs.mjs")], {
