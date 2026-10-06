@@ -1472,6 +1472,23 @@ function Has-Prop($obj, [string]$name) {
 
 function Get-UiProp($node, [string]$name) {
     if ($null -eq $node) { return $null }
+    if ($node -is [System.Array]) {
+        # Компактный узел это позиционные слоты, а не свойства. Без этой ветки
+        # счётчики дерева молча возвращают ноль на compact-деревьях: элементы
+        # есть, а посчитать их нечем.
+        $n = Expand-Node $node
+        switch ($name) {
+            'name' { return $n[0] }
+            'type' { return $n[1] }
+            'id' { return $n[2] }
+            'rect' { return $n[3] }
+            'patterns' { return $n[5] }
+            'value' { return $n[6] }
+            'text' { return $n[7] }
+            'children' { return $n[8] }
+            default { return $null }
+        }
+    }
     if ($node -is [System.Collections.IDictionary]) { return $node[$name] }
     $p = $node.PSObject.Properties[$name]
     if ($p) { return $p.Value }

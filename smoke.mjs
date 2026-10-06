@@ -250,6 +250,11 @@ const demo = (() => {
   } catch { return null; }
 })();
 if (demo) {
+  // Таблица лежит на вкладке History, а UI Automation отдаёт элементы только у
+  // выбранной вкладки. Без явного переключения сценарий падал бы всякий раз,
+  // когда окно оставили на другой вкладке.
+  await checkTarget("computer_select", { title: demo, id: "tabsDetails", value: "History" },
+    (r, t) => /History/.test(t));
   const tbl = await checkTarget("computer_read_table", { title: demo, id: "listScans", maxRows: 8 },
     (r, t) => /"headers"/.test(t) && /"rows"/.test(t) && !/"truncated":\s*true/.test(t));
   // checkTarget отдаёт свой внутренний результат с полем txt, а не сырой
