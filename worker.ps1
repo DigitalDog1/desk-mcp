@@ -794,9 +794,10 @@ class DeskError : System.Exception {
 }
 }
 
-# Коды: ElementNotFound, ElementDisabled, OptionNotFound, PatternUnavailable,
+# Коды, которые реально выдаёт этот файл (сверено с вызовами Fail):
+# ElementNotFound, ElementDisabled, OptionNotFound, PatternUnavailable,
 # NotSelected, WindowNotFound, NeedsConfirm, BlockedByList, InvalidArgument,
-# NotSupported, BudgetExhausted, WorkerRestarted, InputBlocked.
+# NotSupported, CaptureFailed, Timeout, InputBlocked, WorkerRestarted.
 $script:LastErrorCode = ''
 function Fail([string]$code, [string]$msg) {
     # Код дублируется в переменную области скрипта, потому что PowerShell при

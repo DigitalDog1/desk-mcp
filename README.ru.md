@@ -232,6 +232,9 @@ node examples/demo.mjs
   (`Windows.Media.Ocr`, en и ru). Слова приходят с границами, по границе можно
   кликнуть. Про фоллбэк честно: на демо-окне он превратил `ZX-4471-8820` в
   `zx-=v-882C`.
+- `computer_screeninfo`: границы виртуального экрана и всех мониторов.
+  `computer_permissions`: живы ли на этой машине UI Automation, буфер обмена и
+  перечисление окон, чтобы сессия падала на настройке, а не на девятом шаге.
 
 **Дерево интерфейса**
 
@@ -248,14 +251,16 @@ node examples/demo.mjs
   отключает это.
 - `computer_find`: один элемент по имени, роли или `automationId`.
 - `computer_element_at`: цепочка элементов под точкой.
-- `computer_browser_tree`, `computer_browser_descendants`, `computer_browser_eval`,
-  `computer_browser_click`: настоящий DOM страницы по CDP, с готовыми CSS-селекторами
-  и кликом, который сообщает, что именно событие поймало.
+- `computer_browser_start`, `computer_browser_list`, `computer_browser_tree`,
+  `computer_browser_descendants`, `computer_browser_eval`, `computer_browser_click`:
+  настоящий DOM страницы по CDP, с готовыми CSS-селекторами и кликом, который
+  сообщает, что именно событие поймало.
 
 **Руки**
 
 - `computer_click` (модификаторы, `nudge`, `scale`), `computer_move`,
-  `computer_mouse_move`, `computer_drag`, `computer_scroll`, `computer_mouse_button`,
+  `computer_cursor`, `computer_mouse_move`, `computer_drag`, `computer_scroll`,
+  `computer_mouse_button`,
   `computer_type`, `computer_key`, `computer_key_down` / `computer_key_up`,
   `computer_wait`.
 - `computer_polyline`: один непрерывный штрих по списку точек. N отдельных
@@ -277,7 +282,8 @@ node examples/demo.mjs
 - `computer_windows`, `computer_focus`, `computer_wait_window`,
   `computer_active_window`, `computer_window_set_frame`, `computer_close_window`,
   `computer_launch`, `computer_desktop` (виртуальные рабочие столы там, где они
-  есть в сборке Windows), `computer_bench`.
+  есть в сборке Windows), `computer_bench`, `computer_clipboard_get` и
+  `computer_clipboard_set`.
 
 **Проверка**
 

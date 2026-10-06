@@ -229,6 +229,9 @@ stall. Full walk of the demo app, start to finish, including worker start:
   (`Windows.Media.Ocr`, en and ru). Words come back with boxes, so you can click on
   what was read. As a fallback it is unreliable: on the demo window it turned
   `ZX-4471-8820` into `zx-=v-882C`.
+- `computer_screeninfo`: virtual screen bounds and every attached monitor.
+  `computer_permissions`: whether UI Automation, the clipboard and window enumeration
+  actually work on this machine, so a session fails at setup instead of at step nine.
 
 **Interface tree**
 
@@ -243,14 +246,16 @@ stall. Full walk of the demo app, start to finish, including worker start:
   `TablePatternInformation` has no flag for it; `headers: false` disables that.
 - `computer_find`: one element by name, role or `automationId`.
 - `computer_element_at`: the chain of elements under a point.
-- `computer_browser_tree`, `computer_browser_descendants`, `computer_browser_eval`,
-  `computer_browser_click`: the real page DOM over CDP, with ready to use CSS
+- `computer_browser_start`, `computer_browser_list`, `computer_browser_tree`,
+  `computer_browser_descendants`, `computer_browser_eval`, `computer_browser_click`:
+  the real page DOM over CDP, with ready to use CSS
   selectors and a click that reports what actually received the event.
 
 **Hands**
 
 - `computer_click` (modifiers, `nudge`, `scale`), `computer_move`,
-  `computer_mouse_move`, `computer_drag`, `computer_scroll`, `computer_mouse_button`,
+  `computer_cursor`, `computer_mouse_move`, `computer_drag`, `computer_scroll`,
+  `computer_mouse_button`,
   `computer_type`, `computer_key`, `computer_key_down` / `computer_key_up`,
   `computer_wait`.
 - `computer_polyline`: one continuous stroke through a list of points. N separate
@@ -271,7 +276,7 @@ stall. Full walk of the demo app, start to finish, including worker start:
 - `computer_windows`, `computer_focus`, `computer_wait_window`,
   `computer_active_window`, `computer_window_set_frame`, `computer_close_window`,
   `computer_launch`, `computer_desktop` (virtual desktops, where the Windows build
-  has them), `computer_bench`.
+  has them), `computer_bench`, `computer_clipboard_get` and `computer_clipboard_set`.
 
 **Verification**
 

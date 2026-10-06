@@ -36,11 +36,11 @@
 - **`computer_polyline`**: один непрерывный штрих по списку точек. N отдельных
   перетаскиваний поднимают руку на каждой вершине, и вместо линии получается
   набор разорванных отрезков.
-- **Коды ошибок** (13 типов: `ElementNotFound`, `ElementDisabled`,
-  `OptionNotFound`, `PatternUnavailable`, `NotSelected`, `WindowNotFound`,
-  `NeedsConfirm`, `BlockedByList`, `InvalidArgument`, `NotSupported`,
-  `BudgetExhausted`, `WorkerRestarted`, `InputBlocked`, `CaptureFailed`,
-  `Timeout`) в поле `code` рядом с человеческим текстом. Код дублируется в
+- **Коды ошибок** (14 кодов, список сверен со всеми вызовами `Fail` и `errWith`:
+  `ElementNotFound`, `ElementDisabled`, `OptionNotFound`, `PatternUnavailable`,
+  `NotSelected`, `WindowNotFound`, `NeedsConfirm`, `BlockedByList`,
+  `InvalidArgument`, `NotSupported`, `CaptureFailed`, `Timeout`, `InputBlocked`,
+  `WorkerRestarted`) в поле `code` рядом с человеческим текстом. Код дублируется в
   `$script:LastErrorCode`, потому что PowerShell теряет тип исключения,
   выброшенного из скриптблока.
 - **`computer_select` отличает «нечего выбирать» от «нет такого варианта».**
