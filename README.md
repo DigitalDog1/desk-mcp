@@ -497,7 +497,7 @@ desktop, which is the closest thing here to being out of the way.
 npm test
 ```
 
-Expected tail: `ИТОГ: 72 ок, 0 провалов, N пропущено`. The harness prints in Russian:
+Expected tail: `ИТОГ: 75 ок, 0 провалов, N пропущено`. The harness prints in Russian:
 `ок` is passed, `провалов` is failed, `пропущено` is skipped. A skipped check means
 some window on the machine refused to answer UI Automation (Steam, 1C, old WPF hold
 the COM call open) and the breaker caught it. That is a property of somebody else's

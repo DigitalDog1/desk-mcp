@@ -273,6 +273,27 @@ if (demo) {
   // Control.Name ("comboCarrier"). Поиск по id — самый надёжный признак.
   await checkTarget("computer_select", { title: demo, id: "comboCarrier", value: "DHL" },
     (r, t) => /DHL/.test(t));
+  // Дельта обязана увидеть настоящее изменение. Проверка «просто diff» без
+  // изменений проходит и на сломанном коде: все узлы схлопываются в один ключ,
+  // подпись одна, changes пустой, и вызов честно рапортует «ничего не изменилось».
+  // Меняем поле на значение, которого в окне заведомо не было, и ждём update.
+  // Значение должно быть новым в каждом проходе, иначе второй раз пишет то же
+  // самое и изменений действительно не будет.
+  for (const compact of [false, true]) {
+    const args = { title: demo, maxDepth: 6, maxElements: 200, mode: "auto", compact };
+    const before = JSON.parse((await call("computer_read_screen", args)).content?.[0]?.text ?? "{}");
+    await call("computer_set_value", { title: demo, id: "searchBox", value: `ZX-${Date.now()}-${compact ? "c" : "p"}` });
+    const after = JSON.parse((await call("computer_read_screen", { ...args, since: before.token })).content?.[0]?.text ?? "{}");
+    const seen = (after.changes ?? []).length;
+    const label = compact ? "compact" : "обычном";
+    if (after.kind === "diff" && seen >= 1) {
+      pass++;
+      console.log(`  ОК   дельта (${label}): изменение поля видно, ${seen} узлов, ${JSON.stringify(after).length} симв.`);
+    } else {
+      fail++;
+      console.log(`  СБОЙ дельта (${label}): kind=${after.kind}, изменений=${seen} — дельта не увидела заведомо сделанное изменение`);
+    }
+  }
 } else {
   skipped += 2;
   console.log("  ПРОПУЩЕНО computer_read_table и computer_select (положительные) — демо-окно не открыто");

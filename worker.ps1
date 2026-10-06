@@ -1161,7 +1161,11 @@ function Get-NodeSignature($n) {
         # корень окна всегда помечался бы как изменённый и тянул за собой всё
         # поддерево, то есть дельта вырождалась бы в полный ответ. У листа текст
         # собственный, там он и нужен.
-        $hasKids = @($n[8]).Count -gt 0
+        # Проверка именно на null, а не на Count: у листа слота детей нет,
+        # $n[8] это $null, а @(null).Count в PowerShell равен 1. Через Count
+        # лист всегда считался контейнером, и изменения его текста были не видны.
+        $kids = $n[8]
+        $hasKids = ($null -ne $kids) -and (@($kids).Count -gt 0)
         $own = [ordered]@{
             name = $n[0]; type = $n[1]; id = $n[2]; rect = (Get-NodeRectKey $n[3])
             enabled = (($f -band 1) -ne 0); offscreen = (($f -band 2) -ne 0)

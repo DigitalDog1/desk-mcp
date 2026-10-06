@@ -471,7 +471,8 @@ public static class UiaNative
             {
                 head.Append("{\"fields\":[\"name\",\"type\",\"automationId\",\"rect[x,y,w,h]\",");
                 head.Append("\"flags 1=enabled 2=offscreen 4=selected 8=toggled\",\"patterns\",");
-                head.Append("\"value (only ValuePattern)\",\"text (only TextPattern)\",\"children\"],\"windows\":");
+                head.Append("\"value or null (ValuePattern)\",\"text or null (TextPattern)\",\"children\"],");
+                head.Append("\"windows\":");
             }
             else
             {
