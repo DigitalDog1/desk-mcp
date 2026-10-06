@@ -142,7 +142,7 @@ Plain `computer_click` on coordinates, so the cursor walks and the app cannot te
 `npm run bench:full` walks every visible window, measures each read several times, takes the median, and prints token and latency numbers. Text tokens are `chars / 4`, image tokens follow Anthropic's `width * height / 750`. Numbers below come from Windows 10, i5-12400F, Node 24, with live windows:
 
 | Window | Size | `find` | Whole tree | `compact` | Filtered tree | Repeat (`auto`) | Picture | OCR |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Microsoft Edge (Browser) | 2576x1416 | 110 | 8552 | 7388 | 197 | 38 | 4864 | 16191 |
 | File Explorer (Folders) | 1270x859 | 98 | 57844 | 47874 | 2764 | 38 | 1455 | 6808 |
 | LibreOffice (Office) | 2576x1416 | 99 | 29096 | 24486 | 6797 | 38 | 4864 | 17927 |
