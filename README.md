@@ -538,6 +538,10 @@ Everything below was reproduced in practice, not taken from documentation.
 
 ## Where to look next
 
+Continuing work on this repository, whether you are a person or an agent: start from
+`AGENTS.md`. It carries the full state, what is verified and how, the traps, and the next
+goals in priority order.
+
 - [CHANGELOG.md](CHANGELOG.md): every change with its measurement and its reason,
   including the false hypotheses that turned out to be wrong.
 - [CONTRIBUTING.md](CONTRIBUTING.md): traps that the code alone does not reveal. Read

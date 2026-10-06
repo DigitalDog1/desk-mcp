@@ -924,15 +924,24 @@ function Get-WindowList {
     return $result
 }
 
-function Find-WindowByTitle([string]$like, [int]$timeoutSec) {
+function Get-ArgHwnd($a) {
+    $h = 0
+    if ($a -and $null -ne $a.hwnd) { try { $h = [long]$a.hwnd } catch { $h = 0 } }
+    return $h
+}
+
+function Find-WindowByTitle([string]$like, [int]$timeoutSec, [long]$hwnd = 0) {
     # Горячий путь: user32 вместо UIA. Замером ловилось, что при висящем в
     # системе приложении, тормозящем UIA, каждый вызов с названием окна
     # платил 3.0-3.2 с именно здесь. EnumWindows делает то же самое без COM.
+    # Дескриптор важнее заголовка: заголовок живого окна меняется сам, и вызов
+    # со старым заголовком либо промахивается, либо цепляет другое окно.
     $deadline = (Get-Date).AddSeconds($timeoutSec)
     $pat = "*$(Escape-Like $like)*"
     while ($true) {
         foreach ($w in [DeskMcp]::EnumTopWindows()) {
-            if ($w.Visible -and $w.Title -like $pat) {
+            $byHandle = ($hwnd -gt 0) -and ([long]$w.Handle.ToInt64() -eq $hwnd)
+            if ($byHandle -or ($hwnd -le 0 -and $w.Visible -and $w.Title -like $pat)) {
                 return [ordered]@{
                     title   = $w.Title
                     hwnd    = [long]$w.Handle.ToInt64()
@@ -1781,13 +1790,13 @@ function Invoke-Tool {
                     'switch' { [VDesk]::Switch([string]$a.id); $result = [ordered]@{ ok = $true; id = [string]$a.id } }
                     'close' { [VDesk]::Close([string]$a.id); $result = [ordered]@{ ok = $true; id = [string]$a.id } }
                     'of_window' {
-                        $w = Find-WindowByTitle ([string]$a.title) 3
+                        $w = Find-WindowByTitle ([string]$a.title) 3 (Get-ArgHwnd $a)
                         if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не найдено" }
                         $proc = Get-Process -Id $w.process
                         $result = [ordered]@{ title = $w.title; desktop = [VDesk]::OfWindow($proc.MainWindowHandle) }
                     }
                     'move_window' {
-                        $w = Find-WindowByTitle ([string]$a.title) 3
+                        $w = Find-WindowByTitle ([string]$a.title) 3 (Get-ArgHwnd $a)
                         if (-not $w) { throw "Окно '*$($a.title)*' не найдено" }
                         $proc = Get-Process -Id $w.process
                         [VDesk]::MoveWindowTo($proc.MainWindowHandle, [string]$a.id)
@@ -2075,7 +2084,7 @@ function Invoke-Tool {
             }
 
             'focus' {
-                $w = Find-WindowByTitle ([string]$a.title) 3
+                $w = Find-WindowByTitle ([string]$a.title) 3 (Get-ArgHwnd $a)
                 if (-not $w) { Fail 'WindowNotFound' "Окно с заголовком '*$($a.title)*' не найдено за 3 с" }
                 $p = Get-Process -Id $w.process
                 $ok = [DeskMcp]::Focus($p.MainWindowHandle)
@@ -2085,7 +2094,7 @@ function Invoke-Tool {
             'wait_window' {
                 $t = if ($a.timeoutSec) { [int]$a.timeoutSec } else { 20 }
                 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-                $w = Find-WindowByTitle ([string]$a.title) $t
+                $w = Find-WindowByTitle ([string]$a.title) $t (Get-ArgHwnd $a)
                 if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не появилось за $t с" }
                 $result = [ordered]@{ ok = $true; title = $w.title; waitedMs = $sw.ElapsedMilliseconds }
             }
@@ -2097,7 +2106,7 @@ function Invoke-Tool {
                 if (-not $a.confirm) {
                     Fail 'NeedsConfirm' "Закрытие окна требует подтверждения: повтори с confirm: true (окно '*$($a.title)*'$(if ($a.force) { ', force: ' + $a.force }))"
                 }
-                $w = Find-WindowByTitle ([string]$a.title) 3
+                $w = Find-WindowByTitle ([string]$a.title) 3 (Get-ArgHwnd $a)
                 if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не найдено" }
                 $p = Get-Process -Id $w.process -ErrorAction SilentlyContinue
                 if ($a.force) { $p.Kill() } else { $p.CloseMainWindow() | Out-Null }
@@ -2144,7 +2153,7 @@ function Invoke-Tool {
                 # сразу идём к пикселям.
                 $windowMissing = $false
                 if ($title -ne '') {
-                    $found = Find-WindowByTitle $title 3
+                    $found = Find-WindowByTitle $title 3 (Get-ArgHwnd $a)
                     if (-not $found) { $windowMissing = $true }
                 }
 
@@ -2204,7 +2213,7 @@ function Invoke-Tool {
                     $winTitle = ''
                     $captureHwnd = [IntPtr]::Zero
                     if ($title) {
-                        $w = Find-WindowByTitle $title 2
+                        $w = Find-WindowByTitle $title 2 (Get-ArgHwnd $a)
                         if ($w -and $w.rect -and $w.rect.w -gt 0 -and $w.rect.h -gt 0) {
                             $region = "$($w.rect.x),$($w.rect.y),$($w.rect.w),$($w.rect.h)"
                             $winTitle = $w.title
@@ -2613,7 +2622,7 @@ function Invoke-Tool {
             }
 
             'set_frame' {
-                $w = Find-WindowByTitle ([string]$a.title) 3
+                $w = Find-WindowByTitle ([string]$a.title) 3 (Get-ArgHwnd $a)
                 if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не найдено за 3 с" }
                 $p = Get-Process -Id $w.process
                 $h = $p.MainWindowHandle
@@ -2624,7 +2633,7 @@ function Invoke-Tool {
                 $ok = [DeskMcp]::MoveWindow($h, $x, $y, $ww, $hh, $true)
                 if (-not $ok) { Fail 'CaptureFailed' "MoveWindow вернул false (окно '$($w.title)')" }
                 Start-Sleep -Milliseconds 200
-                $after = Find-WindowByTitle ([string]$a.title) 1
+                $after = Find-WindowByTitle ([string]$a.title) 1 (Get-ArgHwnd $a)
                 $result = [ordered]@{
                     ok = $true; title = $w.title
                     requested = [ordered]@{ x = $x; y = $y; w = $ww; h = $hh }
