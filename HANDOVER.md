@@ -256,6 +256,12 @@ circuit breaker, который после зависания блокирует
 - **`Set-Content -Encoding UTF8` в PS 5.1 пишет BOM.** В `.mjs` и `.json` он ломает
   Node (`Invalid or unexpected token` на shebang). Для `worker.ps1` BOM обязателен: без него
   PowerShell 5.1 читает файл как ANSI и ломает кириллицу.
+- **Никогда не переписывать файл с кириллицей через `Set-Content`.** На версии 1.5.0 так
+  сломался `server.mjs`: `Get-Content -Raw | Set-Content -Encoding ascii` заменил русские
+  буквы в описаниях тулов и проверках ошибок на знаки вопроса, `node --check` упал на
+  битом регулярном выражении, и битый коммит уже ушёл на GitHub. Правило: файлы с
+  кириллицей менять только через Edit/Write либо
+  `[System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))`.
 - **`worker.ps1` править только через Edit/Write.** Через `WriteAllBytes` без BOM он
   перестаёт парситься, а через `Set-Content` — получает BOM дважды.
 - **Индексация узлов дерева.** `$x['name']` работает для `ordered`-хэштегов PowerShell и
