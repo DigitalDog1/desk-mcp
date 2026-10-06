@@ -498,6 +498,12 @@ server.registerTool(
       maxChars: z.number().int().min(0).max(200000).optional().default(0)
         .describe("бюджет символов ответа, 0 = без ограничения. При обрезании в ответе " +
                   "появится truncated и подсказка перейти на computer_find"),
+      mode: z.enum(["full", "auto", "reset"]).optional().default("full")
+        .describe("auto возвращает только изменившиеся узлы относительно предыдущего " +
+                  "автоматического чтения. Первый auto и устаревший since дают полный " +
+                  "вид. full базу не обновляет, reset начинает сравнение заново"),
+      since: z.string().optional().default("")
+        .describe("token из предыдущего ответа вида auto; пусто или несовпадение означает полный вид"),
       backend: z.enum(["auto", "uia", "msaa"]).optional().default("auto")
         .describe("auto пробует UIA и при пустом дереве откатывается на MSAA. " +
                   "UIA не работает для Discord/Chrome/VSCode, пока они не запущены с --force-renderer-accessibility"),

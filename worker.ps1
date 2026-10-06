@@ -1007,6 +1007,120 @@ function Get-ElementInfosCached {
     }
 }
 
+# ---- Дельты вместо повторного полного дерева ---------------------------
+# Агентный цикл почти всегда смотрит в одно и то же окно несколько раз.
+# Полное дерево при этом отправляется заново целиком, и на повторных
+# чтениях это самая дорогая часть контекста. Здесь хранится подпись
+# последнего автоматического прохода, и следующий возвращает только
+# изменившиеся узлы.
+#
+#   mode=full   полный вид, базу НЕ обновляет (осмотр всегда честный)
+#   mode=auto   первый раз и при устаревшем токене отдаёт полный вид и
+#               запоминает базу, дальше возвращает дельту
+#   mode=reset  то же, что auto, но база обнуляется принудительно
+$script:TreeBaseline = @{}
+$script:TokenSeq = 0
+
+function New-SnapshotToken {
+    $script:TokenSeq++
+    return "t$($script:TokenSeq)"
+}
+
+function Get-NodeKey($n) {
+    if ($n.id) { return "id:$($n.id)" }
+    $r = $n.rect
+    if ($r) { return "n:$($n.name)|$($n.type)|$($r.x),$($r.y),$($r.w),$($r.h)" }
+    return "n:$($n.name)|$($n.type)"
+}
+
+# Подпись узла без потомков. Если включить children, то изменение одного
+# листа помечало бы "update" всех его предков, и дельта раздувалась бы
+# ровно настолько, чтобы потерять смысл.
+function Get-NodeSignature($n) {
+    $own = [ordered]@{
+        name = $n.name; type = $n.type; id = $n.id; class = $n.class
+        rect = $n.rect; enabled = $n.enabled; offscreen = $n.offscreen
+        patterns = $n.patterns
+    }
+    foreach ($k in @('value', 'text', 'toggle', 'selected')) {
+        if ($n.PSObject.Properties.Name -contains $k) { $own[$k] = $n.$k }
+    }
+    return ($own | ConvertTo-Json -Compress -Depth 4)
+}
+
+function Get-NodeIndex($windows) {
+    $idx = @{}
+    $stack = New-Object System.Collections.Stack
+    foreach ($w in @($windows)) { if ($w) { $stack.Push($w) } }
+    while ($stack.Count -gt 0) {
+        $n = $stack.Pop()
+        $k = Get-NodeKey $n
+        if (-not $idx.ContainsKey($k)) { $idx[$k] = $n }
+        foreach ($c in @($n.children)) { if ($c) { $stack.Push($c) } }
+    }
+    return , $idx
+}
+
+function Compare-Tree([string]$mode, [string]$since, [string]$bkey, $windows, [int]$scanned) {
+    $idx = Get-NodeIndex $windows
+    $sig = @{}
+    $size = 0
+    foreach ($k in $idx.Keys) {
+        $sig[$k] = Get-NodeSignature $idx[$k]
+        $size += $sig[$k].Length
+    }
+    $token = New-SnapshotToken
+    $full = [ordered]@{
+        kind = 'full'; token = $token; windows = $windows; elementsScanned = $scanned
+    }
+
+    if ($mode -ne 'auto') {
+        if ($mode -eq 'reset') {
+            $script:TreeBaseline[$bkey] = @{ token = $token; sig = $sig }
+            $full['baseline'] = 'reset'
+        }
+        return $full
+    }
+
+    $base = $script:TreeBaseline[$bkey]
+    if (-not $base -or $since -ne $base.token) {
+        $script:TreeBaseline[$bkey] = @{ token = $token; sig = $sig }
+        $full['note'] = 'первый автоматический ответ или токен устарел, отдан полный вид'
+        return $full
+    }
+
+    $changes = @()
+    foreach ($k in $idx.Keys) {
+        if (-not $base.sig.ContainsKey($k)) {
+            $changes += ,([ordered]@{ op = 'add'; key = $k; node = $idx[$k] })
+        } elseif ($base.sig[$k] -ne $sig[$k]) {
+            $changes += ,([ordered]@{ op = 'update'; key = $k; node = $idx[$k] })
+        }
+    }
+    foreach ($k in $base.sig.Keys) {
+        if (-not $idx.ContainsKey($k)) { $changes += ,([ordered]@{ op = 'remove'; key = $k }) }
+    }
+
+    $script:TreeBaseline[$bkey] = @{ token = $token; sig = $sig }
+
+    if ($changes.Count -eq 0) {
+        return [ordered]@{
+            kind = 'diff'; token = $token; changes = @(); windows = @()
+            elementsScanned = $scanned
+            note = 'ничего не изменилось'
+        }
+    }
+    $diffSize = ($changes | ConvertTo-Json -Compress -Depth 5).Length
+    if ($diffSize -ge $size) {
+        $full['note'] = 'дельта вышла бы не меньше полного ответа, отдан полный вид'
+        return $full
+    }
+    return [ordered]@{
+        kind = 'diff'; token = $token; changes = $changes; windows = @()
+        elementsScanned = $scanned
+    }
+}
+
 function Get-UiNodes($el, [int]$depth, [int]$maxDepth, [ref]$counter, [int]$maxElements, [bool]$interactiveOnly) {
     if ($depth -gt $maxDepth) { return @() }
     if ($counter.Value -ge $maxElements) { return @() }
@@ -1751,6 +1865,8 @@ function Invoke-Tool {
                 if (-not $windowMissing) {
                     $compact = [bool]$a.compact
                     $maxChars = if ($a.maxChars) { [int]$a.maxChars } else { 0 }
+                    $mode = if ($a.mode) { [string]$a.mode } else { 'full' }
+                    $since = if ($a.since) { [string]$a.since } else { '' }
                     $uia = Get-UiTree $title $md $me $io $compact $maxChars
                     # В компактном виде узлы это массивы, поля name у них нет,
                     # поэтому критерий "дерево содержательное" считаем по
@@ -1758,8 +1874,18 @@ function Invoke-Tool {
                     $uiaUseful = if ($compact) { [int]$uia.elementsScanned -ge 5 }
                                  else { (Count-NamedUiInside $uia.windows) -ge 5 }
                     if ($backend -eq 'uia' -or $uiaUseful) {
-                        $uia['backend'] = 'uia'
-                        $result = $uia
+                        if ($mode -eq 'full') {
+                            $uia['backend'] = 'uia'
+                            $result = $uia
+                        } else {
+                            # База привязана к набору параметров: смена глубины
+                            # или фильтра обязана дать новый полный вид, а не
+                            # сравнение разных форм дерева.
+                            $bkey = "$title|$md|$me|$io|$compact"
+                            $res = Compare-Tree $mode $since $bkey $uia.windows ([int]$uia.elementsScanned)
+                            $res['backend'] = 'uia'
+                            $result = $res
+                        }
                         break
                     }
                     $msaa = Get-MsaaTree $title $md $me $io
