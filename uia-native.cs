@@ -86,6 +86,28 @@ public static class UiaNative
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hWnd);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr OpenInputDesktop(uint dwFlags, bool fInherit, uint dwDesiredAccess);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetThreadDesktop(IntPtr hDesktop);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool CloseDesktop(IntPtr hDesktop);
+
+    private static void AttachInputDesktop()
+    {
+        try
+        {
+            IntPtr h = OpenInputDesktop(0, false, 0x10000000 | 0x1FF);
+            if (h == IntPtr.Zero) h = OpenInputDesktop(0, false, 0x1FF);
+            if (h != IntPtr.Zero)
+            {
+                SetThreadDesktop(h);
+                CloseDesktop(h);
+            }
+        }
+        catch { }
+    }
+
     public static UiaResult Run(int timeoutMs, Delegate job)
     {
         UiaResult res = new UiaResult();
@@ -177,6 +199,7 @@ public static class UiaNative
 
     private static void Pump(Slot mine)
     {
+        AttachInputDesktop();
         mine.ThreadId = Thread.CurrentThread.ManagedThreadId;
 
         while (true)
@@ -411,6 +434,51 @@ public static class UiaNative
             list.Add(w);
         }
         return list;
+    }
+
+    public static string ListWindowsJson()
+    {
+        StringBuilder b = new StringBuilder();
+        b.Append('[');
+        bool first = true;
+        try
+        {
+            AutomationElement root = AutomationElement.RootElement;
+            PropertyCondition cond = new PropertyCondition(
+                AutomationElement.ControlTypeProperty, ControlType.Window);
+            AutomationElementCollection wins = root.FindAll(TreeScope.Children, cond);
+            foreach (AutomationElement w in wins)
+            {
+                try
+                {
+                    IntPtr hwnd = new IntPtr(w.Current.NativeWindowHandle);
+                    bool vis = IsWindowVisible(hwnd);
+                    Rect r = w.Current.BoundingRectangle;
+                    if (!first) b.Append(',');
+                    first = false;
+                    b.Append("{\"title\":").Append(J(w.Current.Name));
+                    b.Append(",\"hwnd\":").Append(hwnd.ToInt64().ToString(CultureInfo.InvariantCulture));
+                    b.Append(",\"process\":").Append(w.Current.ProcessId.ToString(CultureInfo.InvariantCulture));
+                    b.Append(",\"class\":").Append(J(w.Current.ClassName));
+                    b.Append(",\"visible\":").Append(vis ? "true" : "false");
+                    b.Append(",\"rect\":{\"x\":").Append(((int)r.X).ToString(CultureInfo.InvariantCulture));
+                    b.Append(",\"y\":").Append(((int)r.Y).ToString(CultureInfo.InvariantCulture));
+                    b.Append(",\"w\":").Append(((int)r.Width).ToString(CultureInfo.InvariantCulture));
+                    b.Append(",\"h\":").Append(((int)r.Height).ToString(CultureInfo.InvariantCulture));
+                    b.Append("}}");
+                }
+                catch (Exception) { }
+            }
+        }
+        catch (Exception) { }
+        b.Append(']');
+        return b.ToString();
+    }
+
+    public static UiaResult RunListWindows(int timeoutMs)
+    {
+        Func<string> job = delegate() { return ListWindowsJson(); };
+        return Run(timeoutMs, job);
     }
 
     public static string TreeJson(string titleLike, int maxDepth, int maxElements, bool interactiveOnly)

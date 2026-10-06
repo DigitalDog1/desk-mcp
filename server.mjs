@@ -803,6 +803,7 @@ reg(
       "а не по координатам, которые успевают устареть между снимком и кликом.",
     inputSchema: {
       title: z.string().optional().describe("подстрока заголовка окна; пусто — все видимые"),
+      hwnd: z.number().int().optional().describe("дескриптор окна из computer_windows"),
       name: z.string().optional().describe("подстрока имени элемента"),
       type: z.string().optional().describe("ControlType: Button, Edit, CheckBox, Hyperlink..."),
       id: z.string().optional().describe("точный AutomationId"),

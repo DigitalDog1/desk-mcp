@@ -34,9 +34,103 @@ using System.Text;
 using System.Runtime.InteropServices;
 
 public class DeskMcp {
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
-    [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
-    [DllImport("user32.dll")] public static extern uint SendInput(uint n, INPUT[] p, int size);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr OpenInputDesktop(uint dwFlags, bool fInherit, uint dwDesiredAccess);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetThreadDesktop(IntPtr hDesktop);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool CloseDesktop(IntPtr hDesktop);
+
+    private static bool _needsDeskThread = false;
+    private static bool _checkedDesk = false;
+    private static readonly object _deskGate = new object();
+    private static System.Threading.Thread _deskThread = null;
+    private static Action _deskJob = null;
+    private static Exception _deskEx = null;
+    private static System.Threading.ManualResetEventSlim _deskReady = new System.Threading.ManualResetEventSlim(false);
+    private static System.Threading.ManualResetEventSlim _deskDone = new System.Threading.ManualResetEventSlim(false);
+
+    private static void EnsureDeskThread() {
+        if (!_checkedDesk) {
+            POINT p;
+            _needsDeskThread = !GetCursorPosRaw(out p);
+            _checkedDesk = true;
+        }
+        if (!_needsDeskThread) return;
+        lock (_deskGate) {
+            if (_deskThread == null || !_deskThread.IsAlive) {
+                _deskReady.Reset();
+                _deskDone.Reset();
+                _deskThread = new System.Threading.Thread(DeskLoop);
+                _deskThread.SetApartmentState(System.Threading.ApartmentState.STA);
+                _deskThread.IsBackground = true;
+                _deskThread.Start();
+                _deskReady.Wait(2000);
+            }
+        }
+    }
+
+    private static void DeskLoop() {
+        try {
+            IntPtr hDesk = OpenInputDesktop(0, false, 0x10000000 | 0x1FF);
+            if (hDesk == IntPtr.Zero) hDesk = OpenInputDesktop(0, false, 0x1FF);
+            if (hDesk != IntPtr.Zero) {
+                SetThreadDesktop(hDesk);
+                CloseDesktop(hDesk);
+            }
+        } catch {}
+        _deskReady.Set();
+        while (true) {
+            Action job = null;
+            lock (_deskGate) {
+                while (_deskJob == null) System.Threading.Monitor.Wait(_deskGate);
+                job = _deskJob;
+                _deskJob = null;
+            }
+            try {
+                job();
+            } catch (Exception ex) {
+                _deskEx = ex;
+            }
+            _deskDone.Set();
+        }
+    }
+
+    public static void RunOnDesk(Action action) {
+        EnsureDeskThread();
+        if (!_needsDeskThread) {
+            action();
+            return;
+        }
+        lock (_deskGate) {
+            _deskEx = null;
+            _deskJob = action;
+            _deskDone.Reset();
+            System.Threading.Monitor.Pulse(_deskGate);
+        }
+        _deskDone.Wait();
+        if (_deskEx != null) throw _deskEx;
+    }
+
+    [DllImport("user32.dll", EntryPoint = "SetCursorPos")] private static extern bool SetCursorPosRaw(int X, int Y);
+    public static bool SetCursorPos(int X, int Y) {
+        bool res = false;
+        RunOnDesk(delegate() { res = SetCursorPosRaw(X, Y); });
+        return res;
+    }
+
+    [DllImport("user32.dll", EntryPoint = "mouse_event")] private static extern void mouse_event_raw(uint f, uint dx, uint dy, uint d, IntPtr e);
+    public static void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e) {
+        RunOnDesk(delegate() { mouse_event_raw(f, dx, dy, d, e); });
+    }
+
+    [DllImport("user32.dll", EntryPoint = "SendInput")] private static extern uint SendInputRaw(uint n, INPUT[] p, int size);
+    public static uint SendInput(uint n, INPUT[] p, int size) {
+        uint res = 0;
+        RunOnDesk(delegate() { res = SendInputRaw(n, p, size); });
+        return res;
+    }
+
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
@@ -53,9 +147,29 @@ public class DeskMcp {
     [DllImport("user32.dll")] public static extern IntPtr GetDesktopWindow();
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int ht, bool repaint);
     [DllImport("user32.dll")] public static extern short GetKeyState(int vKey);
-    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+
+    [DllImport("user32.dll", EntryPoint = "GetCursorPos")] private static extern bool GetCursorPosRaw(out POINT p);
+    public static bool GetCursorPos(out POINT p) {
+        POINT pt = new POINT();
+        bool ok = false;
+        RunOnDesk(delegate() { ok = GetCursorPosRaw(out pt); });
+        p = pt;
+        return ok;
+    }
+
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+
+    public static System.Drawing.Bitmap CaptureScreen(int x, int y, int w, int h) {
+        System.Drawing.Bitmap bmp = null;
+        RunOnDesk(delegate() {
+            bmp = new System.Drawing.Bitmap(w, h);
+            using (var g = System.Drawing.Graphics.FromImage(bmp)) {
+                g.CopyFromScreen(x, y, 0, 0, new System.Drawing.Size(w, h));
+            }
+        });
+        return bmp;
+    }
 
     // Перечисление верхнеуровневых окон через user32, а не через UIA.
     // Причина замерами: FindWindowByTitle шёл через
@@ -80,9 +194,10 @@ public class DeskMcp {
 
     public static System.Collections.Generic.List<WinInfo> EnumTopWindows() {
         var list = new System.Collections.Generic.List<WinInfo>();
-        var sbT = new System.Text.StringBuilder(512);
-        var sbC = new System.Text.StringBuilder(256);
-        EnumWindows(delegate(IntPtr h, IntPtr l) {
+        RunOnDesk(delegate() {
+            var sbT = new System.Text.StringBuilder(512);
+            var sbC = new System.Text.StringBuilder(256);
+            EnumWindows(delegate(IntPtr h, IntPtr l) {
             sbT.Length = 0; sbC.Length = 0;
             GetWindowTextW(h, sbT, sbT.Capacity);
             GetClassNameW(h, sbC, sbC.Capacity);
@@ -104,7 +219,8 @@ public class DeskMcp {
                 });
             }
             return true;
-        }, IntPtr.Zero);
+            }, IntPtr.Zero);
+        });
         return list;
     }
 
@@ -903,6 +1019,14 @@ function Get-WindowList {
     # их видно через EnumWindows, и фильтровать пришлось бы руками.
     # Этот вызов делают редко, а вот разрешение окна по заголовку идёт
     # в Find-WindowByTitle, и там путь уже на user32.
+    if ($script:NativeUia) {
+        try {
+            $nat = Invoke-UiaNative 'RunListWindows' @([int]$script:UiaBudgetMs)
+            if ($nat) {
+                return @($nat | ConvertFrom-Json)
+            }
+        } catch { }
+    }
     $result = @()
     $root = [System.Windows.Automation.AutomationElement]::RootElement
     $cond = New-Object System.Windows.Automation.PropertyCondition(
@@ -1664,18 +1788,31 @@ function Save-Screenshot {
         if ($WindowTitle) {
             $win = Find-WindowByTitle $WindowTitle 3
             if (-not $win) { Fail 'WindowNotFound' "Окно '*$WindowTitle*' не найдено за 3 с" }
-            $proc = Get-Process -Id $win.process
-            $bmp = [DeskMcp]::CaptureWindow($proc.MainWindowHandle)
-            if ($null -eq $bmp) { Fail 'CaptureFailed' "PrintWindow вернул пустой кадр для '$($win.title)'" }
-            $bounds = [DeskMcp]::WindowBounds($proc.MainWindowHandle)
-            $x = $bounds.X; $y = $bounds.Y
-            $w = $bmp.Width; $h = $bmp.Height
-            $via = 'printwindow'
+            $targetHwnd = [IntPtr]$win.hwnd
+            if ($targetHwnd -eq [IntPtr]::Zero -and $win.process) {
+                try { $targetHwnd = (Get-Process -Id $win.process).MainWindowHandle } catch { }
+            }
+            if ($targetHwnd -ne [IntPtr]::Zero) {
+                $bmp = [DeskMcp]::CaptureWindow($targetHwnd)
+            }
+            if ($null -eq $bmp) {
+                $bounds = [DeskMcp]::WindowBounds($targetHwnd)
+                if ($bounds.Width -gt 0 -and $bounds.Height -gt 0) {
+                    $bmp = [DeskMcp]::CaptureScreen($bounds.X, $bounds.Y, $bounds.Width, $bounds.Height)
+                    $x = $bounds.X; $y = $bounds.Y
+                    $w = $bmp.Width; $h = $bmp.Height
+                    $via = 'screen'
+                } else {
+                    Fail 'CaptureFailed' "PrintWindow вернул пустой кадр для '$($win.title)'"
+                }
+            } else {
+                $bounds = [DeskMcp]::WindowBounds($targetHwnd)
+                $x = $bounds.X; $y = $bounds.Y
+                $w = $bmp.Width; $h = $bmp.Height
+                $via = 'printwindow'
+            }
         } else {
-            $bmp = New-Object System.Drawing.Bitmap $w, $h
-            $g = [System.Drawing.Graphics]::FromImage($bmp)
-            $g.CopyFromScreen($x, $y, 0, 0, (New-Object System.Drawing.Size $w, $h))
-            $g.Dispose(); $g = $null
+            $bmp = [DeskMcp]::CaptureScreen($x, $y, $w, $h)
         }
 
         $tw = $w; $th = $h
@@ -2239,11 +2376,8 @@ function Invoke-Tool {
                             }
                         }
                         if (-not (Test-Path -LiteralPath $tmp)) {
-                            $bmp = New-Object System.Drawing.Bitmap ([int]$rp[2]), ([int]$rp[3])
+                            $bmp = [DeskMcp]::CaptureScreen([int]$rp[0], [int]$rp[1], [int]$rp[2], [int]$rp[3])
                             try {
-                                $g = [System.Drawing.Graphics]::FromImage($bmp)
-                                try { $g.CopyFromScreen([int]$rp[0], [int]$rp[1], 0, 0, (New-Object System.Drawing.Size ([int]$rp[2]), ([int]$rp[3]))) }
-                                finally { $g.Dispose() }
                                 $bmp.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png)
                             } finally { $bmp.Dispose() }
                         }
@@ -2302,17 +2436,13 @@ function Invoke-Tool {
                 # навсегда: один нулевой файл на каждый вызов, измерено.
                 $tmpBase = [System.IO.Path]::GetTempFileName()
                 $tmp = "$tmpBase.png"
-                $bmp = $null; $g = $null
+                $bmp = $null
                 try {
                     $w = [int]$rp[2]; $h = [int]$rp[3]
                     if ($w -le 0 -or $h -le 0) { Fail 'InvalidArgument' "Пустой размер области: ${w}x${h}" }
-                    $bmp = New-Object System.Drawing.Bitmap $w, $h
-                    $g = [System.Drawing.Graphics]::FromImage($bmp)
-                    $g.CopyFromScreen([int]$rp[0], [int]$rp[1], 0, 0, (New-Object System.Drawing.Size $w, $h))
-                    $g.Dispose(); $g = $null
+                    $bmp = [DeskMcp]::CaptureScreen([int]$rp[0], [int]$rp[1], $w, $h)
                     $bmp.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png)
                 } finally {
-                    if ($g) { $g.Dispose() }
                     if ($bmp) { $bmp.Dispose() }
                 }
                 try {
