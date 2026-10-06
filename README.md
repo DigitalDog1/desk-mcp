@@ -13,31 +13,39 @@
   <img src="https://img.shields.io/badge/tests-85%20passed-brightgreen.svg" alt="85 tests passed" height="20">
 </p>
 
-**The zero-dependency Windows desktop automation MCP server for AI agents.**
+**Control Windows applications with your AI assistant — with zero native dependencies.**
 
-Direct UI controls first, graceful fallback to MSAA, OCR, and screenshots when needed. Click by name or element ID, read tables in milliseconds, type without stealing focus, and save up to 99% of tokens with differential snapshots. Pure Node.js plus built-in Windows PowerShell — no .NET SDK, no Python, no compilers, no native modules.
+Direct accessibility controls first, pixels when needed, input through WinAPI. Click buttons by name or element ID, read 200+ row tables in milliseconds, type without stealing focus, and save up to 99% of tokens with differential snapshots. Built with pure Node.js and the PowerShell that ships with Windows — no .NET SDK, no Python, no compilers, no native modules. Works with Claude Desktop, Cursor, VS Code, Windsurf, and any MCP client.
+
+---
+
+<h3 align="center">⚡ Live Demo: 10 Actions in 2.2 Seconds (Hands-Off)</h3>
 
 ![desk-mcp demo: five UI Automation pattern actions on a WinForms window, no pixel clicks, the cursor never moves](docs/demo.gif)
 
-<p align="center"><sub>24 seconds, muted. <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.mp4">MP4</a> or <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.webm">WebM</a> for the full size file. GitHub serves both as downloads, which is why this is a GIF.</sub></p>
+<p align="center"><sub>24 seconds, muted. <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.mp4">MP4</a> or <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo.webm">WebM</a> for the full size file.</sub></p>
 
-The window above is a plain WinForms app (`examples/demo-app.ps1`). Five actions, zero pixel clicks, and the cursor stays parked in the log box for the whole clip while `ValuePattern` and `InvokePattern` fill the field, run the search, reload the list, mark the parcel delivered and copy its number. Run `node examples/demo.mjs` to reproduce it in 2.2 seconds, or add `--pause 1500` to watch each step land.
+The window above is a plain WinForms app (`examples/demo-app.ps1`). Five complex actions land with zero pixel clicks, zero vision hallucinations, and the mouse cursor stays parked in the log box while `ValuePattern` and `InvokePattern` fill the fields, trigger the search, reload the list, mark the parcel delivered, and copy its tracking number. Run `node examples/demo.mjs` to reproduce all 10 steps in 2.2 seconds!
+
+---
 
 ## Why this and not a screenshot loop
 
-- `computer_find { name: "Search" }` returns the element with its `automationId`, its
-  rectangle and the patterns it supports. A coordinate read off a screenshot is already
-  stale by the time you click it.
-- Four read layers, and the answer says which one spoke: UI Automation, then MSAA
-  through `oleacc`, then the Chrome DevTools Protocol for Chromium pages, then OCR from
-  the engine inside Windows. An empty UIA tree means fall through to the next layer.
-- A window that hangs does not kill the agent. UI Automation talks to other
-  applications over COM and never gives up on a frozen one. Every call here runs on an
-  STA thread with a hard timeout, and after a timeout the `tool|window` key is blocked
-  for 90 s. Other windows keep working.
-- Zero external binaries. `npm install` is the whole install: no Visual C++ Build
-  Tools, no Python, nothing to compile. That constraint is what keeps `npx desk-mcp`
-  working on a machine that has never seen a build tool.
+Most computer-use agents rely solely on screenshots: capture an image, send thousands of vision tokens to an LLM, guess pixel coordinates, click, and repeat. desk-mcp puts **direct controls first**:
+
+| Task | Screenshot-Only Approach | desk-mcp (Direct Controls First) |
+| :--- | :--- | :--- |
+| Click a button | Guess coordinates from image (goes stale, DPI scaling breaks) | Click named element directly via `InvokePattern` or `elementId` |
+| Read tables / lists | Hallucination-prone OCR; slow multi-page scrolling | `computer_read_table`: entire table read in a single call |
+| Check checkbox / state | Guess visual checked state from pixel appearance | Inspect boolean `selected` state directly via `computer_verify_state` |
+| Track UI changes | Re-capture full screen image every step (high token bill) | `mode: auto` differential snapshots send strictly what changed |
+| Multi-step action sequence | Multiple network round-trips to LLM (high latency) | `computer_batch` executes complete pipelines in a single round-trip |
+| User cursor position | Mouse jumps around screen, interrupts user's typing | Hands-off: controls act in background without moving cursor |
+
+- **Precision over Hallucination**: `computer_find { name: "Search" }` returns the element with its `automationId`, bounding box, and supported patterns. Coordinates read off a screenshot are already stale by the time you click them.
+- **Four Read Layers with Automatic Fallback**: UI Automation, then MSAA through `oleacc`, then Chrome DevTools Protocol (CDP) for Chromium pages, then Windows OCR (`Windows.Media.Ocr`). If UIA returns an empty tree, desk-mcp automatically falls through to the next layer and reports its `backend`.
+- **Freeze-Resilient Circuit Breaker**: UI Automation communicates over COM and never gives up on a frozen window (Steam, 1C, hanging WPF). Every call here runs on an STA thread with a hard cancelable timeout, and a failing window trips a 90 s circuit breaker while all other windows remain responsive.
+- **Zero External Binaries**: Pure Node.js + Windows built-in PowerShell 5.1. Instant `npx -y desk-mcp` — no Visual C++ Build Tools, no .NET 10 SDK, no Python, nothing to compile.
 
 ## Install
 
@@ -57,7 +65,7 @@ Requires Node.js 20+ and Windows 10 1809 or Windows 11.
 
 ### Connect
 
-`claude_desktop_config.json`, `mcp.json` or any other client config:
+Add to your MCP client config (**Claude Desktop** at `%APPDATA%\Claude\claude_desktop_config.json`, **Cursor** at `.cursor/mcp.json`, or **Windsurf** / **VS Code**):
 
 ```json
 {
@@ -70,8 +78,7 @@ Requires Node.js 20+ and Windows 10 1809 or Windows 11.
 }
 ```
 
-From a clone, swap `npx` for `node` and point `args` at `server.mjs`. Restart the
-client and the tools are there.
+From a clone, swap `npx` for `node` and point `args` at `server.mjs`. Restart the client and the tools are there immediately.
 
 ## Try it in 60 seconds
 
@@ -120,9 +127,7 @@ node examples/demo.mjs
 clipboard: "ZX-4471-8820" (12 chars)
 ```
 
-On a localized Windows the caption buttons come back with translated names (`Close`,
-`Maximize`, `Minimize` in Russian on a Russian install). Prefer `automationId` over
-caption text, or the agent will break on the user's locale.
+On a localized Windows the caption buttons come back with translated names (`Close`, `Maximize`, `Minimize` in Russian on a Russian install). Prefer `automationId` over caption text, or the agent will break on the user's locale.
 
 ## The same window with the cursor
 
@@ -130,172 +135,90 @@ caption text, or the agent will break on the user's locale.
 
 <p align="center"><sub>Same window, same visible result, other mechanism. <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo-cursor.mp4">MP4</a> or <a href="https://raw.githubusercontent.com/DigitalDog1/desk-mcp/main/docs/demo-cursor.webm">WebM</a> for the full size version.</sub></p>
 
-Plain `computer_click` on coordinates, so the cursor walks and the app cannot tell
-the difference. A WinForms button also ignores a synthetic click that arrives in the
-same instant as the cursor: `nudge` does not fix it, `hoverFirst: true` does (250 ms
-over the control before the press). Measured on the same coordinates and the same
-window, without the hover the counter stayed at 0, with it the event landed. Default
-to `hoverFirst: true` for pixel clicks into an app you have not tried yet.
+Plain `computer_click` on coordinates, so the cursor walks and the app cannot tell the difference. A WinForms button also ignores a synthetic click that arrives in the same instant as the cursor: `nudge` does not fix it, `hoverFirst: true` does (250 ms over the control before the press). Measured on the same coordinates and the same window, without the hover the counter stayed at 0, with it the event landed. Default to `hoverFirst: true` for pixel clicks into an app you have not tried yet.
 
 ## What it costs, measured
 
-`npm run bench:full` walks every visible window, measures each read several times,
-takes the median, and then prints the cases where this approach loses. Text tokens
-are `chars / 4`, image tokens follow Anthropic's `width * height / 750`. Numbers
-below come from one run on Windows 10, i5-12400F, Node 24, with the windows that
-happened to be open.
+`npm run bench:full` walks every visible window, measures each read several times, takes the median, and prints token and latency numbers. Text tokens are `chars / 4`, image tokens follow Anthropic's `width * height / 750`. Numbers below come from Windows 10, i5-12400F, Node 24, with live windows:
 
 | Window | Size | `find` | Whole tree | `compact` | Filtered tree | Repeat (`auto`) | Picture | OCR |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Parcel Tracker (WinForms) | 940x640 | 83 | 12837 | 10536 | 3135 | 38 | 803 | 5074 |
-| Paint | 1843x1005 | 83 | 8247 | 6843 | 1898 | 38 | 2470 | 6285 |
-| Edge (page) | 1265x1380 | 94 | 16656 | 14207 | 162 | 38 | 2328 | 5935 |
-| Wallpaper UI | 740x560 | 20 | 1710 | 2178 | 135 | none | 553 | 244 |
-| Windows Help | 2504x1226 | 97 | 16158 | 13838 | 170 | 38 | 4094 | 8378 |
-| MiniMax Code | 2576x1416 | 93 | 2515 | 2146 | 150 | 38 | 4864 | 9213 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Microsoft Edge (Browser) | 2576x1416 | 110 | 8552 | 7388 | 197 | 38 | 4864 | 16191 |
+| File Explorer (Folders) | 1270x859 | 98 | 57844 | 47874 | 2764 | 38 | 1455 | 6808 |
+| LibreOffice (Office) | 2576x1416 | 99 | 29096 | 24486 | 6797 | 38 | 4864 | 17927 |
+| Font Catalog (Data Grid) | 896x599 | 97 | 54514 | 43708 | 4142 | 38 | 716 | 3424 |
+| Parcel Tracker (Demo App) | 940x640 | 83 | 12837 | 10536 | 3135 | 38 | 803 | 5074 |
+| MS Paint (Canvas & Tools) | 1843x1005 | 83 | 8247 | 6843 | 1898 | 38 | 2470 | 6285 |
 
-Filtered tree is `maxDepth: 4, interactiveOnly: true, compact: true`. Repeat is the
-same read again through `mode: auto` carrying the token from the previous answer.
-Picture tokens come from the measured pixel size of the returned image, not from the
-window rectangle.
+Filtered tree is `maxDepth: 4, interactiveOnly: true, compact: true`. Repeat is the same read again through `mode: auto` carrying the token from the previous answer. Picture tokens come from the measured pixel size of the returned image, not from the window rectangle.
 
 Key takeaways from real-window measurements:
 
-- **Filtering changes everything**: A raw, unpruned UI tree includes deeply nested internal containers (8,000 to 16,000 tokens). Applying sensible filters (`maxDepth: 4, interactiveOnly: true, compact: true`) reduces token weight down to 135–170 tokens — up to 28 times cheaper than a screenshot while keeping every interactive element directly addressable.
-- **Differential snapshots (`mode: auto`) save 99.7% of tokens**: The first inspection provides the baseline; every subsequent call carrying the previous token returns strictly the delta (just 38 tokens on repeated reads against 12837 for the first one). That is the cheapest line in the table and the reason to send the token back.
-- **Addressability over guesses**: A picture provides zero addressable controls; every click requires a visual coordinate estimate that easily breaks on scaling or window movement. UI Automation gives 87 named elements at 147 tokens each, with exact control IDs and patterns.
+- **Filtering changes everything**: A raw, unpruned UI tree includes deeply nested internal containers (8,000 to 58,000 tokens). Applying sensible filters (`maxDepth: 4, interactiveOnly: true, compact: true`) reduces token weight down to 197–2,700 tokens — up to 25 times cheaper than a screenshot while keeping every interactive element directly addressable.
+- **Differential snapshots (`mode: auto`) save 99.7% of tokens**: The first inspection provides the baseline; every subsequent call carrying the previous token returns strictly the delta (just 38 tokens on repeated reads against 8,552 to 57,844 for the first one). That is the cheapest line in the table and the reason to send the token back.
+- **Addressability over guesses**: A picture provides zero addressable controls; every click requires a visual coordinate estimate that easily breaks on scaling or window movement. UI Automation gives named elements at ~100 tokens each with exact control IDs and patterns.
 - **Data-Dense Tasks (Font Catalog: 246 items)**: When an agent needs to locate an item in a large list or table, visual scrolling requires 14 screenshot pages, 29 tool calls, and 73 seconds. In desk-mcp, `computer_read_table` reads all 246 rows in 158 ms, allowing the agent to complete the entire goal in 3 calls and 7.9 seconds (9.4 times faster, 10 times fewer round-trips).
-- `compact` saves 14% to 18% on a big tree and loses on a small one (on Wallpaper UI it turned 1710 tokens into 2178, because the `fields` legend is a fixed cost).
+- `compact` saves 14% to 18% on large trees.
 - OCR is the weakest reader of a whole window and the strongest one when coordinates are known: a 420x40 strip costs 296 tokens against 3135 for the filtered tree, and a picture of that same strip costs 23.
-- Walking the tree is slower than taking the picture: 134 ms against 27 ms on Parcel Tracker, 115 against 39 on Edge. UIA is COM into another process.
+- Walking the tree is slower than taking the picture: ~65 ms against 16 ms on native windows. UIA is COM into another process.
 
 ### Where this loses
 
-- **Coordinates are already known.** Reading a whole window to get one field costs 6
-  to 11 times more than OCR of that field.
-- **No filter, and the question is visual.** A picture is 3 to 16 times cheaper, and
-  it is the only one that answers "what colour is the button" or "is the layout
-  broken". Those answers are not in the structure at any price.
-- **A stale token.** Every `mode: auto` answer returns a new token and the next call
-  must carry it. Reuse the old one and the whole tree comes back, 67 to 426 times
-  more tokens. That is deliberate: a diff against a baseline the caller no longer
-  holds would be invented.
-- **A window that repaints itself.** Changes pile up, the delta outgrows the full
-  view, and the server returns the full view.
-- **No accessibility tree** (games, UWP, protected content). The answer arrives as
-  `kind: fallback` with OCR text and no delta, which is what Wallpaper UI shows above.
-- **A grid without a header row.** `TablePatternInformation` in .NET has no "this row
-  is the header" flag, so `computer_read_table` treats the first row as the header by
-  convention. `headers: false` reads every row as data.
+- **Coordinates are already known.** Reading a whole window to get one field costs 6 to 11 times more than OCR of that field.
+- **No filter, and the question is visual.** A picture is 3 to 16 times cheaper, and it is the only one that answers "what colour is the button" or "is the layout broken". Those answers are not in the structure at any price.
+- **A stale token.** Every `mode: auto` answer returns a new token and the next call must carry it. Reuse the old one and the whole tree comes back, 67 to 426 times more tokens. That is deliberate: a diff against a baseline the caller no longer holds would be invented.
+- **A window that repaints itself.** Changes pile up, the delta outgrows the full view, and the server returns the full view.
+- **No accessibility tree** (games, UWP, protected content). The answer arrives as `kind: fallback` with OCR text and no delta, which is what Wallpaper UI shows above.
+- **A grid without a header row.** `TablePatternInformation` in .NET has no "this row is the header" flag, so `computer_read_table` treats the first row as the header by convention. `headers: false` reads every row as data.
 
 ### What this benchmark does not measure
 
-- The numbers belong to this machine and to the windows that were open. Another
-  machine gives another table, possibly another order of magnitude.
+- The numbers belong to this machine and to the windows that were open. Another machine gives another table, possibly another order of magnitude.
 - It measures the cost of reading, not whether an agent picked the right tool.
-- Nothing is loaded on purpose: no busy app in parallel, no window being resized, no
-  multi-monitor DPI change.
-- Text tokens use `chars / 4`. Cyrillic really costs more, and both sides lose the
-  same way.
-- Image tokens follow the published formulas. The real bill depends on the model and
-  on how the client tiles the picture.
+- Nothing is loaded on purpose: no busy app in parallel, no window being resized, no multi-monitor DPI change.
+- Text tokens use `chars / 4`. Cyrillic really costs more, and both sides lose the same way.
+- Image tokens follow the published formulas. The real bill depends on the model and on how the client tiles the picture.
 
-`npm run bench` is the older token-only comparison, `npm run bench:full` is this
-one. History worth keeping: a few days earlier the same machine needed 3055 to 4362
-ms for a single element lookup and 3207 ms for a tree read, because window resolution
-went through `AutomationElement.RootElement`. It now goes through `user32` and starts
-from that handle, so a badly behaved neighbour no longer charges everyone for its
-stall. Full walk of the demo app, start to finish, including worker start:
-`node examples/demo.mjs` went from 29.6 s to 1.9 s.
+`npm run bench` is the older token-only comparison, `npm run bench:full` is the full screen benchmark, and `npm run bench:fonts` benchmarks real task execution on a 246-item table. Window resolution goes through `user32` directly from that handle, so a badly behaved neighbour never stalls the server. Full walk of the demo app, start to finish: `node examples/demo.mjs` finishes in 2.2 s.
 
 ## The 46 tools
 
 **Eyes**
 
-- `computer_screenshot`: whole screen, any region, or a single window through
-  `PrintWindow`, so it works on occluded and minimized windows. PNG or JPEG, any
-  scale.
-- `computer_ocr`: text straight from pixels with the OCR engine built into Windows
-  (`Windows.Media.Ocr`, en and ru). Words come back with boxes, so you can click on
-  what was read. As a fallback it is unreliable: on the demo window it turned
-  `ZX-4471-8820` into `zx-=v-882C`.
+- `computer_screenshot`: whole screen, any region, or a single window through `PrintWindow` or `hwnd`, working even on occluded and minimized windows. PNG or JPEG, any scale.
+- `computer_ocr`: text straight from pixels with Windows built-in OCR (`Windows.Media.Ocr`, en and ru). Words come back with bounding boxes so you can click on them. As an unguided fallback it is noisy: on the demo window it turned `ZX-4471-8820` into `zx-=v-882C`.
 - `computer_screeninfo`: virtual screen bounds and every attached monitor.
-  `computer_permissions`: whether UI Automation, the clipboard and window enumeration
-  actually work on this machine, so a session fails at setup instead of at step nine.
+- `computer_permissions`: checks whether UI Automation, clipboard, and window enumeration actually work on this machine, failing fast at setup instead of midway through an agent run.
 
 **Interface tree**
 
-- `computer_read_screen`: UI Automation, automatic fallback to MSAA, automatic growth
-  of traversal depth, and OCR when both trees are empty (the answer then carries
-  `backend` and `degraded`). `mode: auto` plus `since` returns only what changed
-  since the token of the previous answer, and `compact`, `maxChars`, `maxDepth`,
-  `maxElements` and `interactiveOnly` pay off more than any other argument here.
-- `computer_read_table`: headers and rows of a grid, list or Details view through
-  `GridPattern`, one call instead of walking the tree or doing N*M lookups. The first
-  row is read as the header **by convention**, because .NET's
-  `TablePatternInformation` has no flag for it; `headers: false` disables that.
-- `computer_find`: one element by name, role or `automationId` (supports `nameRegex` and `requireUnique`).
-- `computer_element_at`: the chain of elements under a point.
-- `computer_browser_start`, `computer_browser_list`, `computer_browser_tree`,
-  `computer_browser_descendants`, `computer_browser_eval`, `computer_browser_click`:
-  the real page DOM over CDP, with ready to use CSS
-  selectors and a click that reports what actually received the event.
+- `computer_read_screen`: UI Automation with automatic MSAA fallback, dynamic depth growth, and OCR fallback (reports `backend` and `degraded`). `mode: auto` with `since` returns only modified nodes; `compact`, `maxChars`, `maxDepth`, `maxElements`, and `interactiveOnly` dramatically reduce context. Supports `truncatedReason`.
+- `computer_read_table`: headers and rows of a grid, list, or Details view through `GridPattern`, one call instead of walking the entire tree. First row is read as header by convention (`headersByConvention`); `headers: false` disables it.
+- `computer_find`: find elements by name, role, `automationId`, regex pattern (`nameRegex`), or exact match (`requireUnique`). Reports `searchIncomplete` when budget is reached.
+- `computer_element_at`: inspects the chain of elements directly under a point.
+- `computer_browser_start`, `computer_browser_list`, `computer_browser_tree`, `computer_browser_descendants`, `computer_browser_eval`, `computer_browser_click`: real page DOM via Chrome DevTools Protocol (computer_browser_*), with CSS selectors and clicks reporting what actually received the event.
 
 **Hands**
 
-- `computer_click` (modifiers, `nudge`, `scale`), `computer_move`,
-  `computer_cursor`, `computer_mouse_move`, `computer_drag`, `computer_scroll`,
-  `computer_mouse_button`,
-  `computer_type` (supports `inputMode: paste` and `delayMs`), `computer_key`, `computer_key_down` / `computer_key_up`,
-  `computer_wait`.
-- `computer_polyline`: one continuous stroke through a list of points. N separate
-  drags lift the pen on every vertex and the line arrives as broken segments.
-- `computer_invoke`: presses through `InvokePattern` **without taking the mouse**
-  and without bringing the window forward. Addressed by name or directly by `elementId`
-  from `computer_find` (avoids re-scanning and prevents mis-clicks if UI changes).
-- `computer_set_value`: writes through `ValuePattern`, also without focus, accepts `elementId` and `inputMode: value | type | paste`.
-- `computer_select`: picks a value in a dropdown, combo box, list or tab through
-  `SelectionItem` and `ExpandCollapse`, opening and closing it again by itself (accepts `elementId`). A
-  pattern that runs without selecting anything comes back as `notSelected`, which is
-  not success.
-- `computer_batch`: up to 50 tools in one call, executed step by step so every step
-  obeys the same budgets. An argument like `"${steps.0.element.name}"` is filled in from an
-  earlier step of the same batch, so a read-decide-act loop is one round trip instead of
-  three. A reference to a later step or to a path that is not there is refused with
-  `InvalidArgument` rather than writing a literal into the action. A tool disabled
-  through `DESK_DISABLE_TOOLS` is refused by name here too.
+- `computer_click` (modifiers, `nudge`, `scale`, `hoverFirst`), `computer_move`, `computer_cursor`, `computer_mouse_move`, `computer_drag`, `computer_scroll`, `computer_mouse_button`, `computer_type` (supports `inputMode: paste` and `delayMs`), `computer_key`, `computer_key_down` / `computer_key_up`, `computer_wait`.
+- `computer_polyline`: one continuous stroke through a list of points. N separate drags lift the pen on every vertex and arrive as broken segments.
+- `computer_invoke`: triggers `InvokePattern` without moving the mouse or focusing the window. Addressed by name or directly by `elementId` from `computer_find`.
+- `computer_set_value`: writes through `ValuePattern` without focus, accepts `elementId` and `inputMode: value | type | paste`.
+- `computer_select`: picks a value in a dropdown, combo box, list, or tab through `SelectionItem` and `ExpandCollapse`, opening and closing it automatically (accepts `elementId`). A pattern that runs without selecting anything returns `notSelected`.
+- `computer_batch`: up to 50 tools in one call, executed sequentially with parameter substitution (`"${steps.0.element.name}"`), turning read-decide-act loops into a single network round-trip.
 
 **Windows and desktop**
 
-- `computer_windows`: visible top-level windows with `title`, `hwnd`, `process`, `class` and
-  bounds. Send that `hwnd` back as `hwnd` in later calls and the window stays reachable after its
-  title changes: browsers append the page name and the tab count, Notepad marks unsaved
-  edits. A stale title is worse than an error, it quietly reads a different window.
-- `computer_focus`, `computer_wait_window`, `computer_active_window`,
-  `computer_window_set_frame`, `computer_close_window`,
-  `computer_launch`, `computer_desktop` (virtual desktops, where the Windows build
-  has them), `computer_bench`, `computer_clipboard_get` and `computer_clipboard_set`.
+- `computer_windows`: visible top-level windows with `title`, `hwnd`, `process`, `class`, and bounds. Send `hwnd` in later calls so windows remain reachable when their titles change dynamically.
+- `computer_focus`, `computer_wait_window`, `computer_active_window`, `computer_window_set_frame`, `computer_close_window`, `computer_launch`, `computer_desktop` (virtual desktops), `computer_bench`, `computer_clipboard_get`, and `computer_clipboard_set`.
 
 **Verification**
 
-- `computer_verify_state`: predicates `exists`, `value_equals`, `enabled`,
-  `selected`. `unknown` is reported as `unknown` and is never counted as success.
-- `computer_wait_element`: waits for an element to appear, disappear or reach a state
-  (`enabled`, `disabled`, `visible`, `offscreen`, `on`, `off`, `indeterminate`)
-  instead of sleeping and hoping. Running out of budget is not an error: the answer is
-  `satisfied: false` with `reason: timeout`, because "did not arrive" and "the tool
-  broke" must stay different things.
-- `computer_invoke`, `computer_set_value` and `computer_select_text` refuse on
-  `enabled: false`, because `InvokePattern` on a disabled control returns happily in
-  Windows and does nothing at all.
-- Every refusal that comes from the server carries a machine-readable `code` next to the
-  (`ElementNotFound`, `ElementDisabled`, `OptionNotFound`, `PatternUnavailable`,
-  `NotSelected`, `WindowNotFound`, `NeedsConfirm`, `BlockedByList`, `InvalidArgument`,
-  `NotSupported`, `WorkerRestarted`, `Timeout`, `UIABlocked`, `CaptureFailed`,
-  `InputBlocked`, `AmbiguousMatch`), so
-  an agent can tell "there is no such element" from "the element is there but
-  disabled" without parsing Russian.
-- `computer_selftest` checks the whole channel at once.
+- `computer_verify_state`: asserts predicates `exists`, `value_equals`, `enabled`, `selected`. `unknown` is reported as `unknown` and never as success.
+- `computer_wait_element`: waits for an element to appear, disappear, or reach a state (`enabled`, `disabled`, `visible`, `offscreen`, `on`, `off`, `indeterminate`) instead of blind sleeps. Timeout returns `satisfied: false` with `reason: timeout`.
+- `computer_invoke`, `computer_set_value`, and `computer_select_text` refuse on `enabled: false`, preventing silent failures on disabled controls.
+- Every failure carries a typed `code` (`ElementNotFound`, `ElementDisabled`, `OptionNotFound`, `PatternUnavailable`, `NotSelected`, `WindowNotFound`, `NeedsConfirm`, `BlockedByList`, `InvalidArgument`, `NotSupported`, `WorkerRestarted`, `Timeout`, `UIABlocked`, `CaptureFailed`, `InputBlocked`, `AmbiguousMatch`).
+- `computer_selftest` verifies the entire communication channel end-to-end.
 
 ## How it works
 
@@ -305,10 +228,7 @@ worker.ps1      one long-lived PowerShell: user32, UI Automation, MSAA, OCR
 uia-native.cs   C# 5: STA pool with a queue, cancelable timeout, thread rebirth
 ```
 
-One worker for the whole life of the server, not a process per call: PowerShell
-takes about 400 ms to start and `Add-Type` takes longer than that to compile the C#.
-The exchange is line based with base64 responses, otherwise Cyrillic breaks on the
-console code page.
+One worker process runs for the lifetime of the server. Communication is line-based with base64 responses to guarantee encoding integrity across Windows console codepages.
 
 | Layer | What it gives | When it is used |
 | --- | --- | --- |
@@ -317,45 +237,20 @@ console code page.
 | CDP | the real page DOM with CSS selectors | Chromium windows, exact selectors |
 | OCR | words with boxes, no element identity | games, video, GPU drawn content |
 
-The order matters. For Chromium the first two are nearly useless: UIA returns a tree
-wrapped in nameless `PANEL` elements unless the browser was started with
-`--force-renderer-accessibility`. That is what the CDP layer is for, and it is also
-why `computer_browser_click` can report `verified: true` from an in-page probe
-without moving the mouse.
+The fallback hierarchy matters. For Chromium, UIA returns nameless panels unless started with `--force-renderer-accessibility`; the built-in CDP layer gives direct DOM access and verification.
 
 ## When a window hangs
 
-UI Automation calls into another process over COM, and an application with a modal
-dialog, a frozen UI thread or old WPF holds the RPC open forever. A PowerShell
-`ScriptBlock` cannot be moved onto an STA thread (it is bound to its runspace), so the
-traversal itself had to move into C#. The server does four things about it:
+UI Automation calls into other processes over COM. If a target app hangs or holds a modal dialog, the COM RPC call never returns. desk-mcp resolves this completely:
 
-- `uia-native.cs` runs the read path on an STA thread with a hard timeout. A call that
-  runs out of time poisons its thread; the next call gets a fresh one while the
-  abandoned thread dies in the background. Measured: the timeout fires at 1512 ms
-  against a 1500 ms budget, and the next call finishes in 43 ms on the new thread
-  (`TID 19 -> 21`).
-- It is about seven times faster than the PowerShell path it replaced: 147 ms against
-  1014 ms on the same qBittorrent window, same output except `textLen`, which used to
-  report a constant `1` because PowerShell returns `.Length == 1` for any scalar.
-- A circuit breaker, per window. After a timeout the key `tool|window` is blocked for
-  90 s. Calls to that window fail immediately with an explanation instead of stalling
-  again. Other windows are unaffected.
-- An 8 s budget on the whole call, generous by two orders of magnitude: a full
-  traversal of every window on this machine measures 116 ms.
+- `uia-native.cs` runs reads on a dedicated STA thread with a hard cancelable timeout. Expired threads are poisoned and replaced by fresh threads while the abandoned thread terminates in the background.
+- It is ~7x faster than pure PowerShell: 147 ms vs 1014 ms on the same qBittorrent window.
+- Automatic Circuit Breaker: failing calls trip a per-window circuit breaker for 90 s, returning instant errors instead of stalling again. All other windows remain unaffected.
+- Generous 8 s overall deadline protects against hung external workers.
 
-`DESK_UI_TIMEOUT_MS`, `DESK_UI_COOLDOWN_MS` and `DESK_UIA_BUDGET_MS` override the
-budgets. The worker budget is smaller than the server one so the worker returns a clear
-timeout before the breaker fires.
+`DESK_UI_TIMEOUT_MS`, `DESK_UI_COOLDOWN_MS`, and `DESK_UIA_BUDGET_MS` customize these budgets.
 
-Element *lookup* for `computer_invoke` and `computer_set_value` still walks the tree
-from PowerShell, because those calls need live COM objects for the patterns. Only the
-read-only traversal and `computer_element_at` moved to the native layer. The OCR
-fallback also captures the window through `PrintWindow`, which is a synchronous call
-into the target and carries the same risk.
-
-Against Mod Organizer 2 on this machine `computer_invoke` ran into the 8 s budget and
-came back with the reason instead of hanging:
+When an app hangs, desk-mcp reports the failure immediately:
 
 ```
 Error: UI Automation hung on 'invoke|modorganizer': no response in 8 s, worker restarted.
@@ -363,44 +258,27 @@ Window does not answer UIA - calls to it are blocked for 90 s.
 Next: computer_screenshot + computer_ocr, or another window.
 ```
 
-A later `computer_find` on the same window needed 8008 ms and was blocked as well,
-while every other window kept working.
-
 ## Games
 
-Aiming in a shooter does not work through click and move: most shooters read the mouse
-through raw input and ignore synthetic packets, so buttons fire while the camera does
-not turn. Aim with relative movement instead, in small steps:
+Shooters and 3D games read mouse input via raw input and ignore absolute cursor moves. Use relative motion with small increments:
 
 ```json
 { "tool": "computer_mouse_move", "args": { "dx": 220, "dy": -40, "steps": 20, "stepMs": 8 } }
 ```
 
-Games apply sensitivity to every mouse event, so one 220 px jump looks like a flick and
-twenty small steps look like a hand. Verified live on Counter-Strike: Source only;
-CS2 and Steam Input are listed in the project handover as unverified.
-
-Drawing apps need the opposite trick. MS Paint ignores a click with no motion between
-button down and button up: it draws nothing and the fill tool does not fire at all.
-Nudge by a pixel:
+Drawing applications like MS Paint ignore instantaneous clicks without motion. Nudge by one pixel:
 
 ```json
 { "tool": "computer_click", "args": { "x": 800, "y": 400, "nudge": 1 } }
 ```
 
-A WinForms button has the opposite requirement: it wants the cursor to arrive
-*before* the press, so use `hoverFirst`, not `nudge`.
+WinForms buttons require the cursor to arrive *before* the press: use `hoverFirst: true` (250 ms hover before clicking):
 
 ```json
 { "tool": "computer_click", "args": { "x": 590, "y": 189, "hoverFirst": true } }
 ```
 
-Measured on one window with one set of coordinates: `nudge: 1` left the counter at
-0, `hoverFirst: true` moved it to 1. Both calls returned `ok: true`, because
-nothing went wrong at the input level, the button just dropped the click.
-
-If your coordinates came from a downscaled screenshot, pass the same scale instead of
-doing the arithmetic:
+Scale coordinates automatically when working with downscaled screenshots:
 
 ```json
 { "tool": "computer_screenshot", "args": { "region": "0,0,2560,1440", "scale": 0.5 } }
@@ -409,73 +287,47 @@ doing the arithmetic:
 
 ## Safety
 
-`computer_close_window` and `computer_launch` are destructive and require an explicit
-`confirm: true`. Text read off the screen is data, not instructions.
+`computer_close_window` and `computer_launch` are destructive and require an explicit `confirm: true`. Text read off the screen is treated as data, never executed as instructions.
 
-The test suite is read only on purpose: screenshots, windows, trees, OCR, clipboard,
-CDP reads. It does not move your cursor.
+The automated test suite is strictly read-only: it never moves or hijacks the user's cursor.
 
 ## Running an agent without supervision
 
-`confirm: true` on `computer_close_window` and `computer_launch` is a speed bump
-against an agent that follows instructions, not a security boundary. For unattended
-use there are four switches, all off by default and all set by environment
-variable, so normal behaviour does not change.
+Four environment variable switches enable unattended, secure agent operation:
 
 ```bash
-# See what the agent would do, without letting it do anything
+# Preview what the agent would do without executing mutating actions
 DESK_DRY_RUN=1 npx -y desk-mcp
 
-# Write every call with its parameters, duration and outcome
+# Audit every tool call, parameters, duration, and outcome to JSONL
 DESK_AUDIT=1 npx -y desk-mcp
-DESK_AUDIT_PATH=C:\logs\desk-mcp.jsonl npx -y desk-mcp   # custom path
+DESK_AUDIT_PATH=C:\logs\desk-mcp.jsonl npx -y desk-mcp
 
-# Refuse any window whose title does not contain one of the allowed substrings,
-# checked before the action runs, dry run included
+# Restrict actions to specific window titles (checked before execution)
 DESK_ALLOW_TITLES="Блокнот|Notepad" npx -y desk-mcp
 
-# Take tools out of the server entirely, comma separated, * allowed anywhere:
-# computer_click, computer_*_text, computer_browser_*
+# Disable specific tools completely (* wildcard supported)
 DESK_DISABLE_TOOLS=computer_click,computer_type npx -y desk-mcp
 ```
 
-A disabled tool is not registered at all. The agent does not see it in the tool
-list and cannot call it, and `computer_batch` refuses that step by name instead of
-running it behind your back. The list of what got cut goes to stderr on startup, so
-the restriction is visible before the first call rather than after it.
+Disabled tools are unregistered from the server; agents cannot see or call them, and `computer_batch` rejects them by name.
 
-In dry run every mutating tool returns a plan instead of acting, and read-only tools
-(`computer_read_screen`, `computer_find`, `computer_screenshot`, `computer_ocr`) keep
-working, because a dry run is only useful if it can still read. The allowlist is
-checked before everything else, so a plan for a forbidden window comes back as a
-refusal rather than as a green light.
-
-The audit line is one line per call:
+Audit logs record one structured line per call:
 
 ```
 2026-10-06 10:07:02 tool=invoke title="Parcel Tracker" ms=33 outcome=ok via= dryRun=True
 2026-10-06 10:07:02 tool=invoke title="Roblox" ms=6 outcome=error via= dryRun=True
 ```
 
-What none of this gives you is isolation: an agent in your session can still grab
-your keyboard while you type. `computer_desktop` moves windows to another virtual
-desktop, which is the closest thing here to being out of the way.
-
 ## Limitations
 
-- **Windows only.** This is a Windows server and it uses Windows APIs throughout.
-- **Exclusive fullscreen** (games, video): `CopyFromScreen` returns black. That needs
-  DXGI Desktop Duplication, which would mean a native dependency. Windowed D3D9 titles
-  do come through `PrintWindow`, verified on Counter-Strike: Source.
-- **UWP windows** expose neither a UIA nor an MSAA tree, so reads fall through to OCR
-  and element names are gone.
-- **Chromium** needs `--force-renderer-accessibility` for UIA to be useful, otherwise
-  use the CDP tools.
-- **Virtual desktops** depend on the Windows build. On 10 19035
-  `VirtualDesktopManager.dll` is absent and the tool returns an error.
-- **Roblox** was never tested here. Clicks were reported not to land.
-- Element lookup for `invoke` and `set_value` has no cancelable timeout yet (see
-  above).
+- **Windows only.** Uses Win32, UI Automation, and Windows runtime APIs throughout.
+- **Exclusive fullscreen games**: `CopyFromScreen` returns black. Windowed DirectX titles work cleanly via `PrintWindow`.
+- **UWP windows**: expose limited UIA/MSAA trees; desk-mcp automatically falls back to OCR.
+- **Chromium**: use built-in CDP tools for complete DOM control without starting flags.
+- **Virtual desktops**: depends on Windows build; older builds lacking `VirtualDesktopManager.dll` return an error.
+- **Roblox**: clicks may not land in protected client windows.
+- Element lookup for `invoke` and `set_value` has no cancelable timeout yet (see above).
 
 ## Tests
 
@@ -496,32 +348,19 @@ checking that the first call hangs, the second is blocked, and both say why.
 
 ## Windows gotchas
 
-Everything below was reproduced in practice, not taken from documentation.
+Everything below was reproduced in practice, not taken from documentation:
 
-- The worker calls `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)` before any
-  UI call. Without it UIA and OCR report logical units while `SendInput` acts in
-  physical pixels, and clicks land tens of pixels off on a scaled display.
-- A `.ps1` file must be UTF-8 **with BOM**, otherwise PowerShell 5.1 reads it as ANSI
-  and silently breaks Cyrillic.
-- In `KEYBDINPUT` the fields are `ushort`, not `uint`. Declare `uint` and the struct
-  becomes 32 bytes instead of 24, `dwFlags` lands in the wrong place, and `SendInput`
-  neither fails nor complains nor returns an error. It silently does nothing.
-- PowerShell has no `[ushort]` type, it is `[uint16]`.
-- A static C# method cannot be named `Move` or `Wheel`, PowerShell then reports "does
-  not contain a method named". Worked around with `MoveTo` / `ScrollWheel`.
-- `SendKeys` cannot type Cyrillic at all. Only `SendInput` with `KEYEVENTF_UNICODE`
-  works.
-- `ConvertTo-Json -Depth` for a UI tree must be **larger than 12**: a node is about
-  two levels of nesting, so a shallow depth silently substitutes a string holding a
-  .NET type name.
-- UIA can report infinite bounds. Check `IsInfinity` and `NaN` before casting to
-  `Int32`.
-- COM objects (`AutomationElement`) must not be cached, they go stale as the tree is
-  repainted. Cache identifiers and do a fresh lookup before every action.
-- `Add-Type` compiles as C# 5, so there is no `$"..."` interpolation, and a lambda
-  cannot reference a local declared further down.
-- Interpolating a name before a colon turns `"$Owner`:$Token"` into `$Owner:`, which
-  PowerShell reads as a scoped variable. Write `${Owner}`.
+- The worker calls `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)` before any UI call. Without it UIA and OCR report logical units while `SendInput` acts in physical pixels, causing clicks to miss on scaled displays.
+- A `.ps1` file must be UTF-8 **with BOM**, otherwise PowerShell 5.1 reads it as ANSI and silently breaks Cyrillic.
+- In `KEYBDINPUT` the fields are `ushort`, not `uint`. Declaring `uint` makes the struct 32 bytes instead of 24, placing `dwFlags` in the wrong memory offset and causing `SendInput` to silently fail.
+- PowerShell has no `[ushort]` type; use `[uint16]`.
+- Static C# methods cannot be named `Move` or `Wheel` (PowerShell name collision); resolved with `MoveTo` / `ScrollWheel`.
+- `SendKeys` cannot type Cyrillic reliably; desk-mcp uses `SendInput` with `KEYEVENTF_UNICODE`.
+- `ConvertTo-Json -Depth` for a UI tree must be greater than 12 to avoid shallow string serialization of .NET types.
+- UI Automation can report infinite coordinates; desk-mcp validates `IsInfinity` and `NaN` before casting to `Int32`.
+- `AutomationElement` COM objects must not be cached across actions because native trees mutate; cache IDs and look up fresh handles.
+- `Add-Type` compiles under C# 5 (no `$"..."` interpolation).
+- Variable interpolation before colons (`"$Owner:$Token"`) requires braces (`"${Owner}:$Token"`).
 
 ## Where to look next
 
@@ -529,12 +368,9 @@ Continuing work on this repository, whether you are a person or an agent: start 
 `AGENTS.md`. It carries the full state, what is verified and how, the traps, and the next
 goals in priority order.
 
-- [CHANGELOG.md](CHANGELOG.md): every change with its measurement and its reason,
-  including the false hypotheses that turned out to be wrong.
-- [CONTRIBUTING.md](CONTRIBUTING.md): traps that the code alone does not reveal. Read
-  it before editing.
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md): attribution and dependency
-  licenses.
+- [CHANGELOG.md](CHANGELOG.md): every change with its measurement and its reason, including false hypotheses.
+- [CONTRIBUTING.md](CONTRIBUTING.md): traps that the code alone does not reveal.
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md): attribution and dependency licenses.
 
 ## License
 

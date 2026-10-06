@@ -651,8 +651,7 @@ console.log("== поиск по регулярному выражению и req
 
 console.log("== частичные ответы: truncatedReason и searchIncomplete ==");
 {
-  const uiaWin = (winListH.windows ?? []).find((w) => w.hwnd && w.visible && w.rect.w > 200 && w.rect.x > -1000 && /Font Catalog|Edge|LibreOffice|Parcel Tracker|Explorer/i.test(w.title)) ?? withHwnd;
-  const truncRes = await call("computer_read_screen", { hwnd: uiaWin?.hwnd, maxElements: 10 });
+  const truncRes = await call("computer_read_screen", { title: demo, maxElements: 5, backend: "uia" });
   const truncParsed = JSON.parse(truncRes.content?.[0]?.text ?? "{}");
   const okTrunc = truncParsed.truncated === true && truncParsed.truncatedReason === "maxElements";
   if (okTrunc) {
