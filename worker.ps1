@@ -312,7 +312,7 @@ public class DeskMcp {
 '@ -ReferencedAssemblies System.Drawing
 }
 
-if (-not ("DeskMcp" -as [type])) { throw "Класс DeskMcp не скомпилировался — воркер не может работать" }
+if (-not ("DeskMcp" -as [type])) { Fail 'WorkerRestarted' "Класс DeskMcp не скомпилировался — воркер не может работать" }
 
 
 if (-not ("VDesk" -as [type])) {
@@ -483,7 +483,7 @@ function Assert-TitleAllowed([string]$tool, $a) {
     foreach ($p in $script:AllowTitles) {
         if ($title.ToLowerInvariant().Contains($p.ToLowerInvariant())) { return }
     }
-    throw "Белый список окон не пропускает '$title'. Разрешено: $($script:AllowTitles -join ', ')"
+    Fail 'BlockedByList' "Белый список окон не пропускает '$title'. Разрешено: $($script:AllowTitles -join ', ')"
 }
 
 function New-DryRunPlan([string]$tool, $a) {
@@ -560,7 +560,7 @@ function Invoke-UiAct([string]$action, $a, [int]$depth, [int]$limit) {
 function Invoke-UiaNative([string]$method, [object[]]$argv) {
     $flags = [System.Reflection.BindingFlags]::Public -bor [System.Reflection.BindingFlags]::Static
     $mi = $script:NativeUia.GetMethod($method, $flags)
-    if (-not $mi) { throw "У нативного слоя UIA нет метода $method" }
+    if (-not $mi) { Fail 'NotSupported' "У нативного слоя UIA нет метода $method" }
     $r = $mi.Invoke($null, $argv)
     if ($script:UiaDiag) {
         # При таймауте или ошибке $r.Data равен $null, и обращение к .Length
@@ -571,7 +571,7 @@ function Invoke-UiaNative([string]$method, [object[]]$argv) {
         [Console]::Error.WriteLine("UIA-DIAG: $($script:UiaDiag)")
     }
     if ($r.Ok) { return $r.Data }
-    throw "Нативный слой UIA: $method вернул '$($r.Status)' ($($r.Error))"
+    Fail 'NotSupported' "Нативный слой UIA: $method вернул '$($r.Status)' ($($r.Error))"
 }
 
 if (-not ("MsTree" -as [type])) {
@@ -773,12 +773,51 @@ function ConvertTo-Utf8Base64([string]$s) {
     return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s))
 }
 
-function Send-Response($id, $ok, $data, $error) {
+function Send-Response($id, $ok, $data, $error, $code) {
     $obj = [ordered]@{ id = $id; ok = $ok }
-    if ($ok) { $obj['data'] = $data } else { $obj['error'] = $error }
+    if ($ok) { $obj['data'] = $data } else {
+        $obj['error'] = $error
+        # Машиночитаемый код рядом с текстом. Агент должен ветвиться по коду,
+        # а не разбирать русскую прозу. Нужен только когда код известен.
+        if ($code) { $obj['code'] = $code }
+    }
     $json = $obj | ConvertTo-Json -Depth 32 -Compress
     [Console]::Out.WriteLine("B64:" + (ConvertTo-Utf8Base64 $json))
     [Console]::Out.Flush()
+}
+
+# Ошибка с машиночитаемым кодом. Текст остаётся для человека, код для агента.
+if (-not ("DeskError" -as [type])) {
+class DeskError : System.Exception {
+    [string]$Code
+    DeskError([string]$code, [string]$msg) : base($msg) { $this.Code = $code }
+}
+}
+
+# Коды: ElementNotFound, ElementDisabled, OptionNotFound, PatternUnavailable,
+# NotSelected, WindowNotFound, NeedsConfirm, BlockedByList, InvalidArgument,
+# NotSupported, BudgetExhausted, WorkerRestarted, InputBlocked.
+$script:LastErrorCode = ''
+function Fail([string]$code, [string]$msg) {
+    # Код дублируется в переменную области скрипта, потому что PowerShell при
+    # выбросе из скриптблока (например из кэша Get-UiCached) теряет и тип
+    # исключения, и цепочку InnerException. Переменная переживает любую
+    # обёртку, а DeskError остаётся типом там, где обёртки не было.
+    $script:LastErrorCode = $code
+    throw [DeskError]::new($code, $msg)
+}
+
+# PowerShell оборачивает исключение, выброшенное внутри скрипблока (например
+# в кэше Get-UiCached), поэтому DeskCode лежит не в Exception, а в цепочке
+# InnerException. Ищем по всей цепочке.
+function Get-ErrCode($ex) {
+    $depth = 0
+    while ($ex -and $depth -lt 8) {
+        if ($ex -is [DeskError]) { return $ex.Code }
+        $ex = $ex.InnerException
+        $depth++
+    }
+    return ''
 }
 
 function Rect($r) {
@@ -920,7 +959,7 @@ function Invoke-ScreenOcr {
     })[0]
     function Await($op, $t) {
         $x = $asTaskGeneric.MakeGenericMethod($t).Invoke($null, @($op))
-        if (-not $x.Wait(25000)) { throw "WinRT-вызов не завершился за 25 с" }
+        if (-not $x.Wait(25000)) { Fail 'Timeout' "WinRT-вызов не завершился за 25 с" }
         return $x.Result
     }
     $T = @{
@@ -940,7 +979,7 @@ function Invoke-ScreenOcr {
     $eng = $null
     if ($Lang) { $eng = $T.OcrEngine::TryCreateFromLanguage($T.Language::new($Lang)) }
     if (-not $eng) { $eng = $T.OcrEngine::TryCreateFromUserProfileLanguages() }
-    if (-not $eng) { throw "Не удалось создать OCR-движок: нет ни языка $Lang, ни языков профиля" }
+    if (-not $eng) { Fail 'NotSupported' "Не удалось создать OCR-движок: нет ни языка $Lang, ни языков профиля" }
     $res = Await ($eng.RecognizeAsync($sb)) $T.OcrResult
     $lines = @()
     # WinRT-коллекции (IReadOnlyList) приводим к массиву явно: PowerShell
@@ -1464,20 +1503,20 @@ function Save-Screenshot {
     $x = $vs.Left; $y = $vs.Top; $w = $vs.Width; $h = $vs.Height
     if ($Region) {
         $p = $Region -split ','
-        if ($p.Count -ne 4) { throw "Region должен быть 'x,y,w,h', получено '$Region'" }
+        if ($p.Count -ne 4) { Fail 'InvalidArgument' "Region должен быть 'x,y,w,h', получено '$Region'" }
         $x = [int]$p[0]; $y = [int]$p[1]; $w = [int]$p[2]; $h = [int]$p[3]
     }
-    if ($w -le 0 -or $h -le 0) { throw "Пустой размер снимка: ${w}x${h}" }
+    if ($w -le 0 -or $h -le 0) { Fail 'InvalidArgument' "Пустой размер снимка: ${w}x${h}" }
 
     $bmp = $null; $g = $null; $g2 = $null; $out = $null; $ms = $null; $ep = $null
     $via = 'screen'
     try {
         if ($WindowTitle) {
             $win = Find-WindowByTitle $WindowTitle 3
-            if (-not $win) { throw "Окно '*$WindowTitle*' не найдено за 3 с" }
+            if (-not $win) { Fail 'WindowNotFound' "Окно '*$WindowTitle*' не найдено за 3 с" }
             $proc = Get-Process -Id $win.process
             $bmp = [DeskMcp]::CaptureWindow($proc.MainWindowHandle)
-            if ($null -eq $bmp) { throw "PrintWindow вернул пустой кадр для '$($win.title)'" }
+            if ($null -eq $bmp) { Fail 'CaptureFailed' "PrintWindow вернул пустой кадр для '$($win.title)'" }
             $bounds = [DeskMcp]::WindowBounds($proc.MainWindowHandle)
             $x = $bounds.X; $y = $bounds.Y
             $w = $bmp.Width; $h = $bmp.Height
@@ -1585,7 +1624,7 @@ function Invoke-Tool {
                     'show'  { $result = [ordered]@{ ok = $true; pid = Start-Bench } }
                     'read'  { $result = [ordered]@{ ok = $true; log = Read-BenchLog } }
                     'close' { Stop-Bench; $result = [ordered]@{ ok = $true } }
-                    default { throw "Неизвестное действие bench: '$action' (show|read|close)" }
+                    default { Fail 'InvalidArgument' "Неизвестное действие bench: '$action' (show|read|close)" }
                 }
             }
 
@@ -1602,7 +1641,7 @@ function Invoke-Tool {
                     'close' { [VDesk]::Close([string]$a.id); $result = [ordered]@{ ok = $true; id = [string]$a.id } }
                     'of_window' {
                         $w = Find-WindowByTitle ([string]$a.title) 3
-                        if (-not $w) { throw "Окно '*$($a.title)*' не найдено" }
+                        if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не найдено" }
                         $proc = Get-Process -Id $w.process
                         $result = [ordered]@{ title = $w.title; desktop = [VDesk]::OfWindow($proc.MainWindowHandle) }
                     }
@@ -1613,7 +1652,7 @@ function Invoke-Tool {
                         [VDesk]::MoveWindowTo($proc.MainWindowHandle, [string]$a.id)
                         $result = [ordered]@{ ok = $true; title = $w.title; desktop = [string]$a.id }
                     }
-                    default { throw "Неизвестное действие desktop: '$action' (list|create|switch|close|of_window|move_window)" }
+                    default { Fail 'InvalidArgument' "Неизвестное действие desktop: '$action' (list|create|switch|close|of_window|move_window)" }
                 }
             }
 
@@ -1639,7 +1678,7 @@ function Invoke-Tool {
             'click' {
                 $scale = 1.0
                 if ($null -ne $a.scale) { $scale = [double]$a.scale }
-                if ($scale -le 0) { throw "scale должен быть больше нуля, получено '$($a.scale)'" }
+                if ($scale -le 0) { Fail 'InvalidArgument' "scale должен быть больше нуля, получено '$($a.scale)'" }
                 $cx = [int][math]::Round([double]$a.x / $scale)
                 $cy = [int][math]::Round([double]$a.y / $scale)
                 $nudge = 0
@@ -1648,7 +1687,7 @@ function Invoke-Tool {
                 if ($a.modifiers) {
                     foreach ($m in $a.modifiers) {
                         $mv = Get-Vk $m
-                        if ($null -eq $mv) { throw "Неизвестный модификатор: '$m'" }
+                        if ($null -eq $mv) { Fail 'InvalidArgument' "Неизвестный модификатор: '$m'" }
                         $mods += $mv
                     }
                 }
@@ -1682,23 +1721,23 @@ function Invoke-Tool {
 
             'key_down' {
                 $vk = Get-Vk ([string]$a.key)
-                if ($null -eq $vk) { throw "Неизвестная клавиша: '$($a.key)'" }
+                if ($null -eq $vk) { Fail 'InvalidArgument' "Неизвестная клавиша: '$($a.key)'" }
                 $n = [DeskMcp]::VKey([uint16]$vk, $false)
-                if ($n -ne 1) { throw "SendInput не принял нажатие '$($a.key)' (UIPI?)" }
+                if ($n -ne 1) { Fail 'InputBlocked' "SendInput не принял нажатие '$($a.key)' (UIPI?)" }
                 $result = [ordered]@{ ok = $true; key = $a.key; down = $true; note = 'Клавиша осталась зажатой — отпусти через computer_key_up' }
             }
 
             'key_up' {
                 $vk = Get-Vk ([string]$a.key)
-                if ($null -eq $vk) { throw "Неизвестная клавиша: '$($a.key)'" }
+                if ($null -eq $vk) { Fail 'InvalidArgument' "Неизвестная клавиша: '$($a.key)'" }
                 $n = [DeskMcp]::VKey([uint16]$vk, $true)
-                if ($n -ne 1) { throw "SendInput не принял отпускание '$($a.key)' (UIPI?)" }
+                if ($n -ne 1) { Fail 'InputBlocked' "SendInput не принял отпускание '$($a.key)' (UIPI?)" }
                 $result = [ordered]@{ ok = $true; key = $a.key; up = $true }
             }
 
             'wait' {
                 $ms = if ($a.ms -ne $null) { [int]$a.ms } else { 1000 }
-                if ($ms -lt 0 -or $ms -gt 120000) { throw "Пауза вне диапазона 0..120000 мс: $ms" }
+                if ($ms -lt 0 -or $ms -gt 120000) { Fail 'InvalidArgument' "Пауза вне диапазона 0..120000 мс: $ms" }
                 Start-Sleep -Milliseconds $ms
                 $result = [ordered]@{ ok = $true; waitedMs = $ms }
             }
@@ -1710,19 +1749,19 @@ function Invoke-Tool {
                 # "элемента нет".
                 $wmode = if ($a.mode) { [string]$a.mode } else { 'appear' }
                 if ($wmode -notin @('appear', 'disappear', 'state')) {
-                    throw "Неизвестный режим ожидания '$wmode' (appear|disappear|state)"
+                    Fail 'InvalidArgument' "Неизвестный режим ожидания '$wmode' (appear|disappear|state)"
                 }
                 $timeoutMs = if ($a.timeoutMs) { [int]$a.timeoutMs } else { 5000 }
                 if ($timeoutMs -lt 0 -or $timeoutMs -gt 120000) {
-                    throw "Бюджет ожидания вне диапазона 0..120000 мс: $timeoutMs"
+                    Fail 'InvalidArgument' "Бюджет ожидания вне диапазона 0..120000 мс: $timeoutMs"
                 }
                 $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
                 $desired = if ($a.desiredState) { ([string]$a.desiredState).ToLowerInvariant() } else { '' }
                 if ($wmode -eq 'state' -and $desired -eq '') {
-                    throw "Для mode=state нужен desiredState (enabled|disabled|visible|offscreen|on|off|indeterminate)"
+                    Fail 'InvalidArgument' "Для mode=state нужен desiredState (enabled|disabled|visible|offscreen|on|off|indeterminate)"
                 }
                 if ($wmode -ne 'state' -and $desired -ne '') {
-                    throw "desiredState работает только с mode=state"
+                    Fail 'InvalidArgument' "desiredState работает только с mode=state"
                 }
 
                 # Дедлайн в той же шкале, что Get-MonoMs.
@@ -1804,7 +1843,7 @@ function Invoke-Tool {
             'cursor' {
                 $pt = New-Object DeskMcp+POINT
                 $ok = [DeskMcp]::GetCursorPos([ref]$pt)
-                if (-not $ok) { throw "GetCursorPos вернул false" }
+                if (-not $ok) { Fail 'InvalidArgument' "GetCursorPos вернул false" }
                 $result = [ordered]@{ ok = $true; x = $pt.X; y = $pt.Y }
             }
 
@@ -1821,14 +1860,14 @@ function Invoke-Tool {
                 if ($null -ne $a.steps) { $steps = [int]$a.steps }
                 $stepMs = 0
                 if ($null -ne $a.stepMs) { $stepMs = [int]$a.stepMs }
-                if ($steps -lt 1) { throw "steps должен быть не меньше 1, получено $steps" }
-                if ($steps -gt 500) { throw "steps слишком много: $steps, максимум 500" }
-                if ($stepMs -lt 0 -or $stepMs -gt 200) { throw "stepMs должен быть в диапазоне 0..200, получено $stepMs" }
+                if ($steps -lt 1) { Fail 'InvalidArgument' "steps должен быть не меньше 1, получено $steps" }
+                if ($steps -gt 500) { Fail 'InvalidArgument' "steps слишком много: $steps, максимум 500" }
+                if ($stepMs -lt 0 -or $stepMs -gt 200) { Fail 'InvalidArgument' "stepMs должен быть в диапазоне 0..200, получено $stepMs" }
                 [DeskMcp]::MoveBy($dx, $dy, $steps, $stepMs)
                 Start-Sleep -Milliseconds 40
                 $pt = New-Object 'DeskMcp+POINT'
                 $got = [DeskMcp]::GetCursorPos([ref]$pt)
-                if (-not $got) { throw "GetCursorPos вернул false" }
+                if (-not $got) { Fail 'InvalidArgument' "GetCursorPos вернул false" }
                 $result = [ordered]@{
                     ok = $true; dx = $dx; dy = $dy; steps = $steps; stepMs = $stepMs
                     x = $pt.X; y = $pt.Y
@@ -1852,7 +1891,7 @@ function Invoke-Tool {
                 $txt = [string]$a.text
                 $n = [DeskMcp]::TypeUnicode($txt)
                 if ($txt.Length -gt 0 -and $n -ne $txt.Length * 2) {
-                    throw "SendInput принял $n событий из $($txt.Length * 2) — ввод заблокирован (UIPI?)"
+                    Fail 'InputBlocked' "SendInput принял $n событий из $($txt.Length * 2) — ввод заблокирован (UIPI?)"
                 }
                 $result = [ordered]@{ ok = $true; chars = $txt.Length; events = $n }
             }
@@ -1863,9 +1902,9 @@ function Invoke-Tool {
                 foreach ($p in $parts) {
                     if ($p -in @('ctrl','control','shift','alt','win','lwin')) { $mods += (Get-Vk $p) } else { $main = $p }
                 }
-                if (-not $main) { throw "Не найдена основная клавиша в '$($a.keys)'" }
+                if (-not $main) { Fail 'InvalidArgument' "Не найдена основная клавиша в '$($a.keys)'" }
                 $vk = Get-Vk $main
-                if ($null -eq $vk) { throw "Неизвестная клавиша: '$main'" }
+                if ($null -eq $vk) { Fail 'InvalidArgument' "Неизвестная клавиша: '$main'" }
                 $sent = 0
                 $wasDown = @()
                 foreach ($m in $mods) {
@@ -1880,7 +1919,7 @@ function Invoke-Tool {
                     if (-not $wasDown[$i]) { $sent += [DeskMcp]::VKey([uint16]$mods[$i], $true) }
                 }
                 if ($sent -ne (($mods.Count + 1) * 2)) {
-                    throw "SendInput принял $sent событий из $(($mods.Count + 1) * 2) — ввод не дошёл"
+                    Fail 'InputBlocked' "SendInput принял $sent событий из $(($mods.Count + 1) * 2) — ввод не дошёл"
                 }
                 $result = [ordered]@{ ok = $true; keys = $a.keys; events = $sent }
             }
@@ -1893,7 +1932,7 @@ function Invoke-Tool {
 
             'focus' {
                 $w = Find-WindowByTitle ([string]$a.title) 3
-                if (-not $w) { throw "Окно с заголовком '*$($a.title)*' не найдено за 3 с" }
+                if (-not $w) { Fail 'WindowNotFound' "Окно с заголовком '*$($a.title)*' не найдено за 3 с" }
                 $p = Get-Process -Id $w.process
                 $ok = [DeskMcp]::Focus($p.MainWindowHandle)
                 $result = [ordered]@{ ok = $ok; title = $w.title; process = $w.process }
@@ -1903,7 +1942,7 @@ function Invoke-Tool {
                 $t = if ($a.timeoutSec) { [int]$a.timeoutSec } else { 20 }
                 $sw = [System.Diagnostics.Stopwatch]::StartNew()
                 $w = Find-WindowByTitle ([string]$a.title) $t
-                if (-not $w) { throw "Окно '*$($a.title)*' не появилось за $t с" }
+                if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не появилось за $t с" }
                 $result = [ordered]@{ ok = $true; title = $w.title; waitedMs = $sw.ElapsedMilliseconds }
             }
 
@@ -1912,10 +1951,10 @@ function Invoke-Tool {
                 # убивает процесс с несохранёнными данными. Требуем явного
                 # подтверждения — ровно как needsApproval у OpenAI.
                 if (-not $a.confirm) {
-                    throw "Закрытие окна требует подтверждения: повтори с confirm: true (окно '*$($a.title)*'$(if ($a.force) { ', force: ' + $a.force }))"
+                    Fail 'NeedsConfirm' "Закрытие окна требует подтверждения: повтори с confirm: true (окно '*$($a.title)*'$(if ($a.force) { ', force: ' + $a.force }))"
                 }
                 $w = Find-WindowByTitle ([string]$a.title) 3
-                if (-not $w) { throw "Окно '*$($a.title)*' не найдено" }
+                if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не найдено" }
                 $p = Get-Process -Id $w.process -ErrorAction SilentlyContinue
                 if ($a.force) { $p.Kill() } else { $p.CloseMainWindow() | Out-Null }
                 $result = [ordered]@{ ok = $true; title = $w.title; forced = [bool]$a.force }
@@ -1923,9 +1962,9 @@ function Invoke-Tool {
 
             'launch' {
                 if (-not $a.confirm) {
-                    throw "Запуск программы требует подтверждения: повтори с confirm: true (путь '$($a.path)')"
+                    Fail 'NeedsConfirm' "Запуск программы требует подтверждения: повтори с confirm: true (путь '$($a.path)')"
                 }
-                if (-not $a.path) { throw "Не указан путь к программе" }
+                if (-not $a.path) { Fail 'InvalidArgument' "Не указан путь к программе" }
                 $sp = @{
                     FilePath  = $a.path
                     PassThru  = $true
@@ -2095,7 +2134,7 @@ function Invoke-Tool {
             'ocr' {
                 $region = if ($a.region) { [string]$a.region } else { '0,0,2560,1440' }
                 $rp = $region -split ','
-                if ($rp.Count -ne 4) { throw "Region должен быть 'x,y,w,h', получено '$region'" }
+                if ($rp.Count -ne 4) { Fail 'InvalidArgument' "Region должен быть 'x,y,w,h', получено '$region'" }
                 # GetTempFileName СОЗДАЁТ файл на диске. Если дописать к нему
                 # '.png' и удалить только результат, базовый tmpXXXX.tmp остаётся
                 # навсегда: один нулевой файл на каждый вызов, измерено.
@@ -2104,7 +2143,7 @@ function Invoke-Tool {
                 $bmp = $null; $g = $null
                 try {
                     $w = [int]$rp[2]; $h = [int]$rp[3]
-                    if ($w -le 0 -or $h -le 0) { throw "Пустой размер области: ${w}x${h}" }
+                    if ($w -le 0 -or $h -le 0) { Fail 'InvalidArgument' "Пустой размер области: ${w}x${h}" }
                     $bmp = New-Object System.Drawing.Bitmap $w, $h
                     $g = [System.Drawing.Graphics]::FromImage($bmp)
                     $g.CopyFromScreen([int]$rp[0], [int]$rp[1], 0, 0, (New-Object System.Drawing.Size $w, $h))
@@ -2136,7 +2175,7 @@ function Invoke-Tool {
                     }
                     $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
                                            ([string]$a.id) $depth $limit
-                    if (@($hits).Count -eq 0) { throw "Не найдено ни одного элемента по заданным условиям" }
+                    if (@($hits).Count -eq 0) { Fail 'ElementNotFound' "Не найдено ни одного элемента по заданным условиям" }
                     $items = @()
                     foreach ($h in $hits) { $items += ,(Convert-ElementInfo $h) }
                     [ordered]@{ count = $items.Count; elements = $items }
@@ -2151,7 +2190,7 @@ function Invoke-Tool {
                 $nat = Invoke-UiAct 'invoke' $a $depth 1
                 if ($nat) {
                     if ($nat.status -eq 'disabled') {
-                        throw "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, нажать нельзя. Нажатие отчиталось бы успехом, но ничего не изменит."
+                        Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, нажать нельзя. Нажатие отчиталось бы успехом, но ничего не изменит."
                     }
                     if ($nat.status -eq 'ok') {
                         $result = [ordered]@{ ok = $true; via = $nat.via; element = $nat.element }
@@ -2165,7 +2204,7 @@ function Invoke-Tool {
                 }
 
                 $hits = Resolve-Target $a
-                if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден — нажимать нечего" }
+                if (@($hits).Count -eq 0) { Fail 'ElementNotFound' "Элемент '$($a.name)' не найден — нажимать нечего" }
                 $pair = @($hits)[0]
                 $el = $pair[0]
                 $info = Convert-ElementInfo $pair
@@ -2174,7 +2213,7 @@ function Invoke-Tool {
                 # где серая кнопка «Копировать» вернула ok, а буфер не изменился.
                 # Ложный «нажал» хуже отказа, поэтому проверяем заранее.
                 if ($info['enabled'] -eq $false) {
-                    throw "Элемент '$($info['name'])' неактивен (enabled=false): приложение его отключило, нажать нельзя. Нажатие отчиталось бы успехом, но ничего не изменит."
+                    Fail 'ElementDisabled' "Элемент '$($info['name'])' неактивен (enabled=false): приложение его отключило, нажать нельзя. Нажатие отчиталось бы успехом, но ничего не изменит."
                 }
                 $invokeErr = $null
                 try {
@@ -2185,7 +2224,7 @@ function Invoke-Tool {
                 } catch { $invokeErr = $_.Exception.Message }
                 $r = $info['rect']
                 if ($r['w'] -le 0 -or $r['h'] -le 0) {
-                    throw "У элемента нет InvokePattern ('$invokeErr') и нулевые границы: $($r | ConvertTo-Json -Compress) — нажать нечем"
+                    Fail 'PatternUnavailable' "У элемента нет InvokePattern ('$invokeErr') и нулевые границы: $($r | ConvertTo-Json -Compress) — нажать нечем"
                 }
                 $cx = $r['x'] + [int]($r['w'] / 2)
                 $cy = $r['y'] + [int]($r['h'] / 2)
@@ -2204,7 +2243,7 @@ function Invoke-Tool {
                 $nat = Invoke-UiAct 'set_value' $a $depth 1
                 if ($nat) {
                     if ($nat.status -eq 'disabled') {
-                        throw "Элемент '$($nat.element.name)' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
+                        Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
                     }
                     if ($nat.status -eq 'ok') {
                         $result = [ordered]@{ ok = $true; via = $nat.via; value = [string]$a.value; element = $nat.element }
@@ -2213,18 +2252,18 @@ function Invoke-Tool {
                     # notfound уходит в фоллбэк по той же причине, что и в invoke.
                 }
                 $hits = Resolve-Target $a
-                if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден" }
+                if (@($hits).Count -eq 0) { Fail 'ElementNotFound' "Элемент '$($a.name)' не найден" }
                 $el = @($hits)[0][0]
                 $info = Convert-ElementInfo @($hits)[0]
                 if ($info['enabled'] -eq $false) {
-                    throw "Элемент '$($info['name'])' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
+                    Fail 'ElementDisabled' "Элемент '$($info['name'])' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
                 }
                 try {
                     $vp = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
                     $vp.SetValue([string]$a.value)
                     $result = [ordered]@{ ok = $true; via = 'ValuePattern'; value = [string]$a.value; element = $info }
                 } catch {
-                    throw "У элемента нет доступного для записи ValuePattern: $($_.Exception.Message)"
+                    Fail 'PatternUnavailable' "У элемента нет доступного для записи ValuePattern: $($_.Exception.Message)"
                 }
             }
 
@@ -2237,11 +2276,11 @@ function Invoke-Tool {
                 # только результат с проверкой, что элемент действительно выбран.
                 $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
                 $want = if ($a.value) { [string]$a.value } else { '' }
-                if ($want -eq '') { throw "Не передано значение для выбора (value)" }
+                if ($want -eq '') { Fail 'InvalidArgument' "Не передано значение для выбора (value)" }
                 $nat = Invoke-UiAct 'select' $a $depth 1
                 if ($nat) {
                     if ($nat.status -eq 'disabled') {
-                        throw "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, выбирать нечего."
+                        Fail 'ElementNotFound' "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, выбирать нечего."
                     }
                     if ($nat.status -eq 'ok') {
                         $result = [ordered]@{
@@ -2251,18 +2290,18 @@ function Invoke-Tool {
                         break
                     }
                     if ($nat.status -eq 'optionNotFound') {
-                        throw "Вариант '$want' не найден среди элементов '$($nat.element.name)'. Список значений: computer_read_screen этого окна покажет их."
+                        Fail 'OptionNotFound' "Вариант '$want' не найден среди элементов '$($nat.element.name)'. Список значений: computer_read_screen этого окна покажет их."
                     }
                     if ($nat.status -eq 'notSelected') {
-                        throw "Паттерн SelectionItem отработал, но элемент не выбрался (status notSelected). Значит элемент виден, но не выбирается."
+                        Fail 'NotSelected' "Паттерн SelectionItem отработал, но элемент не выбрался (status notSelected). Значит элемент виден, но не выбирается."
                     }
                     if ($nat.status -eq 'notfound') {
-                        throw "Элемент '$($a.name)' не найден — выбирать нечего"
+                        Fail 'ElementNotFound' "Элемент '$($a.name)' не найден — выбирать нечего"
                     }
-                    throw "Выбор не удался: $($nat.status) $($nat.error)"
+                    Fail 'NotSelected' "Выбор не удался: $($nat.status) $($nat.error)"
                 }
                 # Нативного слоя нет: честный отказ, а не выдуманный успех.
-                throw "Выбор значения требует нативного слоя UIA, а uia-native.cs не загрузился: $($script:NativeUiaError)"
+                Fail 'NotSupported' "Выбор значения требует нативного слоя UIA, а uia-native.cs не загрузился: $($script:NativeUiaError)"
             }
 
             'select_text' {
@@ -2272,16 +2311,16 @@ function Invoke-Tool {
                 if ($nat -and $nat.status -eq 'ok' -and @($nat.elements).Count -gt 0) {
                     $natInfo = @($nat.elements)[0]
                     if ($natInfo.enabled -eq $false) {
-                        throw "Элемент '$($natInfo.name)' неактивен (enabled=false): поле отключено, выделять нечего."
+                        Fail 'ElementDisabled' "Элемент '$($natInfo.name)' неактивен (enabled=false): поле отключено, выделять нечего."
                     }
                 }
                 if (-not $natInfo) {
                     $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
                                            ([string]$a.id) $depth 1
-                    if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден" }
+                    if (@($hits).Count -eq 0) { Fail 'ElementNotFound' "Элемент '$($a.name)' не найден" }
                     $natInfo = Convert-ElementInfo @($hits)[0]
                     if ($natInfo['enabled'] -eq $false) {
-                        throw "Элемент '$($natInfo['name'])' неактивен (enabled=false): поле отключено, выделять нечего."
+                        Fail 'ElementDisabled' "Элемент '$($natInfo['name'])' неактивен (enabled=false): поле отключено, выделять нечего."
                     }
                 }
                 $info = $natInfo
@@ -2303,7 +2342,7 @@ function Invoke-Tool {
 
             'verify' {
                 $checks = @($a.expect)
-                if ($checks.Count -eq 0) { throw "Ни одного предиката не передано" }
+                if ($checks.Count -eq 0) { Fail 'InvalidArgument' "Ни одного предиката не передано" }
                 $report = @()
                 $allOk = $true
                 foreach ($chk in $checks) {
@@ -2351,7 +2390,7 @@ function Invoke-Tool {
 
             'set_frame' {
                 $w = Find-WindowByTitle ([string]$a.title) 3
-                if (-not $w) { throw "Окно '*$($a.title)*' не найдено за 3 с" }
+                if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не найдено за 3 с" }
                 $p = Get-Process -Id $w.process
                 $h = $p.MainWindowHandle
                 $x = if ($null -ne $a.x) { [int]$a.x } else { $w.rect.x }
@@ -2359,7 +2398,7 @@ function Invoke-Tool {
                 $ww = if ($a.width)  { [int]$a.width }  else { $w.rect.w }
                 $hh = if ($a.height) { [int]$a.height } else { $w.rect.h }
                 $ok = [DeskMcp]::MoveWindow($h, $x, $y, $ww, $hh, $true)
-                if (-not $ok) { throw "MoveWindow вернул false (окно '$($w.title)')" }
+                if (-not $ok) { Fail 'CaptureFailed' "MoveWindow вернул false (окно '$($w.title)')" }
                 Start-Sleep -Milliseconds 200
                 $after = Find-WindowByTitle ([string]$a.title) 1
                 $result = [ordered]@{
@@ -2407,7 +2446,7 @@ function Invoke-Tool {
                 }
             }
 
-            default { throw "Неизвестный инструмент: '$tool'" }
+            default { Fail 'InvalidArgument' "Неизвестный инструмент: '$tool'" }
         }
     return , $result
 }
@@ -2444,7 +2483,10 @@ while ($true) {
         Send-Response $id $true $result $null
     } catch {
         $outcome = 'error'
-        Send-Response $id $false $null $_.Exception.Message
+        $code = Get-ErrCode $_.Exception
+        if (-not $code) { $code = $script:LastErrorCode }
+        $script:LastErrorCode = ''
+        Send-Response $id $false $null $_.Exception.Message $code
     } finally {
         Write-AuditLog $tool $a $started $outcome $result
     }
