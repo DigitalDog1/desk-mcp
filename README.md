@@ -149,12 +149,12 @@ happened to be open.
 
 | Window | Size | `find` | Whole tree | `compact` | Filtered tree | Repeat (`auto`) | Picture | OCR |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Parcel Tracker (WinForms) | 940x640 | 83 | 12834 | 10531 | 3131 | 38 | 803 | 4878 |
-| Paint | 1843x1005 | 83 | 8247 | 6842 | 1896 | 38 | 2470 | 6090 |
-| Edge (page) | 1265x1380 | 94 | 14881 | 12703 | 160 | 38 | 2328 | 5902 |
-| Wallpaper UI | 740x560 | 20 | 1710 | 2177 | 133 | none | 553 | 244 |
-| Windows Help | 2504x1226 | 97 | 16158 | 13836 | 169 | 38 | 4094 | 8341 |
-| MiniMax Code | 2576x1416 | 93 | 2515 | 2144 | 148 | 38 | 4864 | 8939 |
+| Parcel Tracker (WinForms) | 940x640 | 83 | 12837 | 10536 | 3135 | 38 | 803 | 5074 |
+| Paint | 1843x1005 | 83 | 8247 | 6843 | 1898 | 38 | 2470 | 6285 |
+| Edge (page) | 1265x1380 | 94 | 16656 | 14207 | 162 | 38 | 2328 | 5935 |
+| Wallpaper UI | 740x560 | 20 | 1710 | 2178 | 135 | none | 553 | 244 |
+| Windows Help | 2504x1226 | 97 | 16158 | 13838 | 170 | 38 | 4094 | 8378 |
+| MiniMax Code | 2576x1416 | 93 | 2515 | 2146 | 150 | 38 | 4864 | 9213 |
 
 Filtered tree is `maxDepth: 4, interactiveOnly: true, compact: true`. Repeat is the
 same read again through `mode: auto` carrying the token from the previous answer.
@@ -175,7 +175,7 @@ Read honestly, this table is not a victory lap:
   Wallpaper UI it turned 1710 tokens into 2177, because the `fields` legend is a
   fixed cost. Measure, do not assume: 22% and 27% were the numbers for the same code
   on a different set of windows.
-- A repeat read through `mode: auto` costs 38 tokens against 12834 for the first
+- A repeat read through `mode: auto` costs 38 tokens against 12837 for the first
   one. That is the cheapest line in the table and the reason to send the token back.
 - OCR is the weakest reader of a window and the strongest one when the coordinates
   are known: a 420x40 strip costs 296 tokens against 3131 for the filtered tree, and
