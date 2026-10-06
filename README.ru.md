@@ -281,8 +281,12 @@ node examples/demo.mjs
 
 **Окна и рабочий стол**
 
-- `computer_windows`, `computer_focus`, `computer_wait_window`,
-  `computer_active_window`, `computer_window_set_frame`, `computer_close_window`,
+- `computer_windows`: видимые верхнеуровневые окна с `title`, `hwnd`, `process`, `class` и
+  границами. Этот `hwnd` можно передать назад в следующих вызовах, и окно останется
+  доступным после смены заголовка: браузер дописывает название страницы и число вкладок, Блокнот
+  помечает несохранённое. Устаревший заголовок хуже ошибки: он молча читает другое окно.
+- `computer_focus`, `computer_wait_window`, `computer_active_window`,
+  `computer_window_set_frame`, `computer_close_window`,
   `computer_launch`, `computer_desktop` (виртуальные рабочие столы там, где они
   есть в сборке Windows), `computer_bench`, `computer_clipboard_get` и
   `computer_clipboard_set`.
@@ -497,7 +501,7 @@ npm test
 npm run check:docs      # README.md и README.ru.md описывают одно и то же
 ```
 
-Ожидаемый хвост: `ИТОГ: 72 ок, 0 провалов, N пропущено`. Пропуск означает, что
+Ожидаемый хвост: `ИТОГ: 77 ок, 0 провалов, N пропущено`. Пропуск означает, что
 какое-то окно на машине не ответило на UI Automation (Steam, 1С или старый WPF
 держат COM-вызов открытым), и это поймал circuit breaker. Это свойство чужого
 приложения, а не дефект, поэтому прогон от этого не краснеет. Провалов больше нуля

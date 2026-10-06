@@ -544,7 +544,7 @@ function Invoke-UiAct([string]$action, $a, [int]$depth, [int]$limit) {
     # выдержать и это.
     try {
         if (-not $script:NativeUia) { return $null }
-        $hwnd = Find-WindowHwnd ([string]$a.title)
+        $hwnd = Get-TargetHwnd $a
         if ($hwnd -eq 0) { return $null }
         $argv = @(
             [int]$script:UiaBudgetMs, $hwnd, $action, [string]$a.name, [string]$a.type,
@@ -913,6 +913,7 @@ function Get-WindowList {
             $r = $w.Current.BoundingRectangle
             $result += [ordered]@{
                 title   = $w.Current.Name
+                hwnd    = [long]$w.Current.NativeWindowHandle
                 process = $w.Current.ProcessId
                 class   = $w.Current.ClassName
                 rect    = Rect $r
@@ -934,6 +935,7 @@ function Find-WindowByTitle([string]$like, [int]$timeoutSec) {
             if ($w.Visible -and $w.Title -like $pat) {
                 return [ordered]@{
                     title   = $w.Title
+                    hwnd    = [long]$w.Handle.ToInt64()
                     process = $w.Pid
                     class   = $w.Class
                     rect    = [ordered]@{ x = $w.X; y = $w.Y; w = $w.W; h = $w.H }
@@ -1521,7 +1523,17 @@ function Count-NamedUiInside($windows) {
     return $n
 }
 
-function Find-WindowHwnd([string]$title) {
+function Find-WindowHwnd([string]$title, [long]$hwnd = 0) {
+    # Если вызывающий знает дескриптор окна, заголовок не нужен вовсе. У живых
+    # окон заголовок меняется сам: браузер дописывает число вкладок, Блокнот
+    # ставит звёздочку несохранённого, приложение дописывает состояние. Окно,
+    # найденное один раз по заголовку, через минуту может перестать находиться.
+    if ($hwnd -gt 0) {
+        foreach ($w in [DeskMcp]::EnumTopWindows()) {
+            if ([long]$w.Handle.ToInt64() -eq $hwnd) { return $hwnd }
+        }
+        return [long]0
+    }
     # HWND верхнеуровневого окна по подстроке заголовка, через user32.
     # 0, если не нашлось. Нужен, чтобы не заставлять нативный слой искать
     # окно перебором RootElement: замерено, что касание RootElement стоит
@@ -1535,9 +1547,20 @@ function Find-WindowHwnd([string]$title) {
     return [long]0
 }
 
+# Единая точка выбора окна для всех инструментов: сначала дескриптор, и только
+# потом заголовок. Пока заголовок единственный способ найти окно, агент вынужден
+# держать его в памяти между вызовами, а он протухает у живых окон.
+function Get-TargetHwnd($a) {
+    $h = 0
+    if ($a -and $null -ne $a.hwnd) {
+        try { $h = [long]$a.hwnd } catch { $h = 0 }
+    }
+    return Find-WindowHwnd ([string]$a.title) $h
+}
+
 function Get-UiTree([string]$titleLike, [int]$maxDepth, [int]$maxElements, [bool]$interactiveOnly,
-                     [bool]$compact = $false, [int]$maxChars = 0) {
-    $hwnd = Find-WindowHwnd $titleLike
+                     [bool]$compact = $false, [int]$maxChars = 0, [long]$hwnd = 0) {
+    if ($hwnd -eq 0) { $hwnd = Find-WindowHwnd $titleLike }
     if ($script:NativeUia) {
         if ($compact -or $maxChars -gt 0) {
             # Отдельное имя метода, а не перегрузка: Invoke-UiaNative ищет метод
@@ -2130,7 +2153,8 @@ function Invoke-Tool {
                     $maxChars = if ($a.maxChars) { [int]$a.maxChars } else { 0 }
                     $mode = if ($a.mode) { [string]$a.mode } else { 'full' }
                     $since = if ($a.since) { [string]$a.since } else { '' }
-                    $uia = Get-UiTree $title $md $me $io $compact $maxChars
+                    $winHwnd = Get-TargetHwnd $a
+                    $uia = Get-UiTree $title $md $me $io $compact $maxChars $winHwnd
                     # В компактном виде узлы это массивы, поля name у них нет,
                     # поэтому критерий "дерево содержательное" считаем по
                     # числу просмотренных элементов, а не по именам.
@@ -2144,7 +2168,7 @@ function Invoke-Tool {
                             # База привязана к набору параметров: смена глубины
                             # или фильтра обязана дать новый полный вид, а не
                             # сравнение разных форм дерева.
-                            $bkey = "$title|$md|$me|$io|$compact"
+                            $bkey = "$winHwnd|$md|$me|$io|$compact"
                             $res = Compare-Tree $mode $since $bkey $uia.windows ([int]$uia.elementsScanned)
                             $res['backend'] = 'uia'
                             $result = $res
@@ -2405,7 +2429,7 @@ function Invoke-Tool {
                 $maxColumns = if ($a.maxColumns) { [int]$a.maxColumns } else { 50 }
                 $useHeaders = if ($null -ne $a.headers) { [bool]$a.headers } else { $true }
                 if ($script:NativeUia) {
-                    $hw = Find-WindowHwnd ([string]$a.title)
+                    $hw = Get-TargetHwnd $a
                     if ($hw -ne 0) {
                         $argv = @([int]$script:UiaBudgetMs, $hw, [string]$a.name, [string]$a.type,
                                   [string]$a.id, [int]$depth, [int]$maxRows, [int]$maxColumns, $useHeaders)

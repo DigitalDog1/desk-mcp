@@ -504,7 +504,7 @@ reg(
     description:
       "Поднимает окно по подстроке заголовка и делает его активным. Пытается обойти " +
       "отказ SetForegroundWindow через AttachThreadInput — иначе фокус уезжает в никуда молча.",
-    inputSchema: { title: z.string() },
+    inputSchema: { title: z.string(), hwnd: z.number().int().optional() },
   },
   R(async (a) => ok(await worker.call("focus", a))),
 );
@@ -769,7 +769,7 @@ reg(
       "мыши и без перевода окна на передний план. Если InvokePattern недоступен, падает обратно " +
       "на клик по центру границ элемента (тогда окно получит фокус).",
     inputSchema: {
-      title: z.string().optional(),
+      title: z.string().optional(), 
       name: z.string().optional(),
       type: z.string().optional(),
       id: z.string().optional(),
@@ -788,7 +788,7 @@ reg(
       "Не сработает там, где приложение держит значение только в своём обработчике — " +
       "проверяй результат через computer_verify_state, а не по факту вызова.",
     inputSchema: {
-      title: z.string().optional(),
+      title: z.string().optional(), 
       name: z.string().optional(),
       type: z.string().optional(),
       id: z.string().optional(),
@@ -809,7 +809,7 @@ reg(
       "сворачивает обратно. Возвращает выбранное имя и проверенный признак selected: " +
       "если паттерн отработал, а элемент не выбрался, это отдельный отказ, а не успех.",
     inputSchema: {
-      title: z.string().optional().describe("подстрока заголовка окна"),
+      title: z.string().optional().describe("подстрока заголовка окна (у живых окон меняется, тогда нужен hwnd)"), 
       name: z.string().optional().describe("имя элемента со списком, подстрока"),
       type: z.string().optional().describe("роль: ComboBox, List, Tab, ListItem..."),
       id: z.string().optional().describe("automationId элемента со списком"),
@@ -830,7 +830,7 @@ reg(
       "\"эта строка заголовок\", поэтому первая строка читается как заголовок по соглашению, " +
       "а не по гарантии Windows; отключается headers:false.",
     inputSchema: {
-      title: z.string().optional().describe("подстрока заголовка окна"),
+      title: z.string().optional().describe("подстрока заголовка окна (у живых окон меняется, тогда нужен hwnd)"), 
       name: z.string().optional().describe("имя таблицы, подстрока"),
       type: z.string().optional().describe("роль: DataGrid, Table, List..."),
       id: z.string().optional().describe("automationId таблицы, самый надёжный признак"),
@@ -865,7 +865,7 @@ reg(
   {
     title: "Выделить текст поля",
     description: "Кликает по полю и выделяет всё содержимое (Ctrl+A).", inputSchema: {
-      title: z.string().optional(), name: z.string().optional(),
+      title: z.string().optional(),  
       type: z.string().optional(), id: z.string().optional(),
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
@@ -962,7 +962,7 @@ reg(
       "Таймаут возвращается как satisfied:false с reason:timeout, а не ошибкой: агент должен " +
       "отличать «не дождался» от «сломалось», и отсутствие элемента по таймауту ничего не доказывает.",
     inputSchema: {
-      title: z.string().optional().describe("подстрока заголовка окна"),
+      title: z.string().optional().describe("подстрока заголовка окна (у живых окон меняется, тогда нужен hwnd)"), 
       name: z.string().optional().describe("имя элемента, подстрока"),
       type: z.string().optional().describe("роль: Button, Edit, ListItem..."),
       id: z.string().optional().describe("automationId, самый надёжный признак"),

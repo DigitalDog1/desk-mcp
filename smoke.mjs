@@ -545,6 +545,28 @@ console.log("== отключение инструментов (DESK_DISABLE_TOOL
 // отдельном скрипте, потому что её правила меняются отдельно от сценариев:
 // английский «4 to 16 times» и русский «в 3-16 раз» это один факт, а числа в
 // таблице замеров обязаны совпадать до знака.
+console.log("== окно адресуется дескриптором, а не только заголовком ==");
+// Заголовок живого окна меняется сам: браузер дописывает число вкладок,
+// Блокнот ставит звёздочку несохранённого. Агент, который держит заголовок между
+// вызовами, получает либо отказ, либо, что хуже, чтение чужого окна.
+const winListH = JSON.parse((await call("computer_windows", {})).content?.[0]?.text ?? "{}");
+const withHwnd = (winListH.windows ?? []).find((w) => w.hwnd && w.visible && w.rect.w > 200);
+if (!withHwnd) {
+  skipped++;
+  console.log("  ПРОПУЩЕНО дескриптор окна — в списке окон нет ни одного с hwnd");
+} else {
+  const byHandle = await call("computer_find", { hwnd: withHwnd.hwnd, limit: 1 });
+  const okHandle = !byHandle.content?.[0]?.text?.startsWith("Ошибка");
+  const hasHwndField = (winListH.windows ?? []).every((w) => w.hwnd !== undefined);
+  if (okHandle && hasHwndField) {
+    pass++;
+    console.log(`  ОК   окно «${withHwnd.title.slice(0, 24)}» найдено по дескриптору ${withHwnd.hwnd}, заголовок не использовался`);
+  } else {
+    fail++;
+    console.log(`  СБОЙ дескриптор окна: поиск ${okHandle ? "прошёл" : "отказал"}, hwnd у всех окон: ${hasHwndField}`);
+  }
+}
+
 console.log("== два README описывают одно и то же ==");
 {
   const r = spawnSync(process.execPath, [path.join(__dirname, "check-docs.mjs")], {

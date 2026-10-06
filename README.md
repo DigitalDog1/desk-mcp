@@ -277,8 +277,12 @@ stall. Full walk of the demo app, start to finish, including worker start:
 
 **Windows and desktop**
 
-- `computer_windows`, `computer_focus`, `computer_wait_window`,
-  `computer_active_window`, `computer_window_set_frame`, `computer_close_window`,
+- `computer_windows`: visible top-level windows with `title`, `hwnd`, `process`, `class` and
+  bounds. Send that `hwnd` back as `hwnd` in later calls and the window stays reachable after its
+  title changes: browsers append the page name and the tab count, Notepad marks unsaved
+  edits. A stale title is worse than an error, it quietly reads a different window.
+- `computer_focus`, `computer_wait_window`, `computer_active_window`,
+  `computer_window_set_frame`, `computer_close_window`,
   `computer_launch`, `computer_desktop` (virtual desktops, where the Windows build
   has them), `computer_bench`, `computer_clipboard_get` and `computer_clipboard_set`.
 
@@ -490,7 +494,7 @@ npm test
 npm run check:docs      # README.md и README.ru.md описывают одно и то же
 ```
 
-Expected tail: `ИТОГ: 72 ок, 0 провалов, N пропущено`. The harness prints in Russian:
+Expected tail: `ИТОГ: 77 ок, 0 провалов, N пропущено`. The harness prints in Russian:
 `ок` is passed, `провалов` is failed, `пропущено` is skipped. A skipped check means
 some window on the machine refused to answer UI Automation (Steam, 1C, old WPF hold
 the COM call open) and the breaker caught it. That is a property of somebody else's
