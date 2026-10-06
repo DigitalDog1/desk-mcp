@@ -734,6 +734,27 @@ server.registerTool(
 );
 
 server.registerTool(
+  "computer_select",
+  {
+    title: "Выбрать значение",
+    description: "Выбирает значение в выпадающем списке, поле со списком, списке или " +
+      "на вкладке через штатные паттерны SelectionItem и ExpandCollapse, без " +
+      "раскрытия списка кликами и угадывания координат. Раскрывает, выбирает и " +
+      "сворачивает обратно. Возвращает выбранное имя и проверенный признак selected: " +
+      "если паттерн отработал, а элемент не выбрался, это отдельный отказ, а не успех.",
+    inputSchema: {
+      title: z.string().optional().describe("подстрока заголовка окна"),
+      name: z.string().optional().describe("имя элемента со списком, подстрока"),
+      type: z.string().optional().describe("роль: ComboBox, List, Tab, ListItem..."),
+      id: z.string().optional().describe("automationId элемента со списком"),
+      value: z.string().describe("видимый текст выбираемого варианта"),
+      maxDepth: z.number().int().min(1).max(20).optional().default(8),
+    },
+  },
+  R(async (a) => ok(await callUi("select", a))),
+);
+
+server.registerTool(
   "computer_select_text",
   {
     title: "Выделить текст поля",

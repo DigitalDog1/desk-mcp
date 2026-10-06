@@ -949,12 +949,154 @@ public static class UiaNative
                 }
             }
 
+            if (action == "select")
+            {
+                return SelectJson(el, ct, info, value);
+            }
+
             return "{\"status\":\"unknownAction\",\"error\":" + J(action) + "}";
         }
         catch (Exception ex)
         {
             return "{\"status\":\"error\",\"error\":" + J(ex.GetType().Name + ": " + ex.Message) + "}";
         }
+    }
+
+    // Выбор значения в выпадающем списке, поле со списком или на вкладке.
+    //
+    // Именно этот кусок раньше был недостижим из PowerShell: SelectionItem
+    // и ExpandCollapse вызываются на STA-потоке, а живой объект наружу не
+    // отдаётся. Раскрытие, выбор и сворачивание обратно делаются здесь же,
+    // наружу уходит только результат.
+    private static string SelectJson(AutomationElement el, string ct, string info, string value)
+    {
+        string wanted = value == null ? "" : value;
+        ExpandCollapsePattern ec = null;
+        bool expandedByUs = false;
+
+        try
+        {
+            ec = el.GetCurrentPattern(ExpandCollapsePattern.Pattern) as ExpandCollapsePattern;
+            if (ec != null && ec.Current.ExpandCollapseState != ExpandCollapseState.Expanded)
+            {
+                ec.Expand();
+                expandedByUs = true;
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        AutomationElement found = null;
+        try
+        {
+            PropertyCondition cond = new PropertyCondition(AutomationElement.NameProperty, wanted);
+            found = el.FindFirst(TreeScope.Descendants, cond);
+        }
+        catch (Exception)
+        {
+        }
+
+        if (found == null)
+        {
+            // Вариант может быть и самим элементом: у вкладки или пункта
+            // списка SelectionItemPattern лежит на самом элементе, а у выпадающего
+            // списка лежит на потомке. Поэтому сначала пробуем сам элемент.
+            try
+            {
+                SelectionItemPattern self = el.GetCurrentPattern(SelectionItemPattern.Pattern)
+                    as SelectionItemPattern;
+                string selfName = "";
+                try { selfName = el.Current.Name; } catch (Exception) { }
+                if (self != null && !string.IsNullOrEmpty(selfName) &&
+                    (selfName.IndexOf(wanted, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     string.Equals(selfName, wanted, StringComparison.OrdinalIgnoreCase)))
+                {
+                    found = el;
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        if (found == null && wanted.Length > 0)
+        {
+            // Имя может отличаться регистром или содержать хвост вроде
+            // "DHL (Express)". Ищем вхождение, ограничивая обход.
+            try
+            {
+                TreeWalker w = Walker();
+                Stack<AutomationElement> stack = new Stack<AutomationElement>();
+                AutomationElement first = el.FindFirst(TreeScope.Descendants, Condition.TrueCondition);
+                if (first != null) stack.Push(first);
+                int scanned = 0;
+                while (stack.Count > 0 && scanned < 200)
+                {
+                    scanned++;
+                    AutomationElement cur = stack.Pop();
+                    string n = "";
+                    try { n = cur.Current.Name; } catch (Exception) { }
+                    if (!string.IsNullOrEmpty(n) &&
+                        n.IndexOf(wanted, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        found = cur;
+                        break;
+                    }
+                    try
+                    {
+                        AutomationElement ch = w.GetFirstChild(cur);
+                        while (ch != null) { stack.Push(ch); ch = w.GetNextSibling(ch); }
+                    }
+                    catch (Exception) { }
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        if (found == null)
+        {
+            return "{\"status\":\"optionNotFound\",\"option\":" + J(wanted) +
+                   ",\"element\":" + info + "}";
+        }
+
+        bool selected = false;
+        string via = "SelectionItemPattern";
+        try
+        {
+            SelectionItemPattern si = found.GetCurrentPattern(SelectionItemPattern.Pattern)
+                as SelectionItemPattern;
+            if (si != null)
+            {
+                si.Select();
+                selected = si.Current.IsSelected;
+            }
+            else
+            {
+                via = "";
+            }
+        }
+        catch (Exception ex)
+        {
+            try { if (ec != null && expandedByUs) ec.Collapse(); } catch (Exception) { }
+            return "{\"status\":\"error\",\"error\":" + J(ex.Message) + ",\"element\":" + info + "}";
+        }
+
+        try { if (ec != null && expandedByUs) ec.Collapse(); } catch (Exception) { }
+
+        if (!selected)
+        {
+            // Паттерн отработал без ошибки, но элемент не выбрался. Ложное
+            // "сработало" хуже отказа, поэтому отдаём отдельный статус.
+            return "{\"status\":\"notSelected\",\"via\":" + J(via) + ",\"element\":" + info + "}";
+        }
+
+        string chosen = "";
+        try { chosen = found.Current.Name; } catch (Exception) { }
+        return "{\"status\":\"ok\",\"selected\":true,\"via\":" + J(via) + ",\"selectedName\":" +
+               J(chosen) + ",\"element\":" + info + "}";
     }
 
     public static UiaResult RunActByHwnd(int timeoutMs, long hwnd, string action, string nameLike,

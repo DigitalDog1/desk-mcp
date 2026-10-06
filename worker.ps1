@@ -2228,6 +2228,43 @@ function Invoke-Tool {
                 }
             }
 
+            'select' {
+                # Выбор значения в выпадающем списке, поле со списком или на
+                # вкладке. Раньше это было недостижимо: SelectionItem и
+                # ExpandCollapse вызываются на STA-потоке, а PowerShell держит
+                # свой единственный runspace и зависает на этом. Теперь раскрытие,
+                # выбор и сворачивание делает нативный слой, наружу уходит
+                # только результат с проверкой, что элемент действительно выбран.
+                $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
+                $want = if ($a.value) { [string]$a.value } else { '' }
+                if ($want -eq '') { throw "Не передано значение для выбора (value)" }
+                $nat = Invoke-UiAct 'select' $a $depth 1
+                if ($nat) {
+                    if ($nat.status -eq 'disabled') {
+                        throw "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, выбирать нечего."
+                    }
+                    if ($nat.status -eq 'ok') {
+                        $result = [ordered]@{
+                            ok = $true; via = $nat.via; selected = [bool]$nat.selected
+                            selectedName = [string]$nat.selectedName; element = $nat.element
+                        }
+                        break
+                    }
+                    if ($nat.status -eq 'optionNotFound') {
+                        throw "Вариант '$want' не найден среди элементов '$($nat.element.name)'. Список значений: computer_read_screen этого окна покажет их."
+                    }
+                    if ($nat.status -eq 'notSelected') {
+                        throw "Паттерн SelectionItem отработал, но элемент не выбрался (status notSelected). Значит элемент виден, но не выбирается."
+                    }
+                    if ($nat.status -eq 'notfound') {
+                        throw "Элемент '$($a.name)' не найден — выбирать нечего"
+                    }
+                    throw "Выбор не удался: $($nat.status) $($nat.error)"
+                }
+                # Нативного слоя нет: честный отказ, а не выдуманный успех.
+                throw "Выбор значения требует нативного слоя UIA, а uia-native.cs не загрузился: $($script:NativeUiaError)"
+            }
+
             'select_text' {
                 $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
                 $natInfo = $null
