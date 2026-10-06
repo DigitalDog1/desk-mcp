@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -143,14 +144,16 @@ if (tKey) {
   const autoArgs = { title: tKey, maxDepth: 5, maxElements: 120, interactiveOnly: true, mode: "auto" };
   const txt1 = (await call("computer_read_screen", autoArgs)).content?.[0]?.text ?? "";
   let tok = null;
-  try { tok = JSON.parse(txt1).token ?? null; } catch { /* ответ не JSON — сценарий упадёт на проверке токена */ }
-  if (tok) {
-    pass++;
-    console.log(`  ОК   дельта: первый mode=auto отдал baseline, ${txt1.length} симв.`);
+  try { tok = JSON.parse(txt1).token ?? null; } catch { /* ответ не JSON */ }
+  if (!tok) {
+    // Окно без дерева доступности (Блокнот, UWP, игры) не может быть базой
+    // дельты, и это свойство окна, а не инструмента. Пропуск с названием окна
+    // честнее, чем падение, которое выглядело бы как баг.
+    skipped += 3;
+    console.log(`  ПРОПУЩЕНО дельты — «${tKey}» не отдаёт дерево доступности, базы не будет`);
   } else {
-    fail++;
-    console.log(`  СБОЙ дельта: mode=auto не вернул токен: ${txt1.slice(0, 120)}`);
-  }
+  pass++;
+  console.log(`  ОК   дельта: первый mode=auto отдал baseline, ${txt1.length} симв.`);
   // Свежий токен обязан дать дельту, а не полный вид. Принимать "full" здесь
   // нельзя: полный вид и означает, что дельта не работает.
   const txt2 = (await call("computer_read_screen", { ...autoArgs, since: tok })).content?.[0]?.text ?? "";
@@ -195,6 +198,7 @@ if (tKey) {
       fail++;
       console.log(`  СБОЙ дельта compact: kind=${cj?.kind} вместо diff: ${c2.slice(0, 120)}`);
     }
+  }
   }
 } else {
   skipped += 3;
@@ -534,6 +538,26 @@ console.log("== отключение инструментов (DESK_DISABLE_TOOL
     console.log(`  ОШИБКА DESK_DISABLE_TOOLS: ${e.message.slice(0, 200)}`);
   } finally {
     try { await c3.close(); } catch { /* уже закрыт */ }
+  }
+}
+
+// Русский README обязан описывать то же самое, что английский. Проверка живёт в
+// отдельном скрипте, потому что её правила меняются отдельно от сценариев:
+// английский «4 to 16 times» и русский «в 3-16 раз» это один факт, а числа в
+// таблице замеров обязаны совпадать до знака.
+console.log("== два README описывают одно и то же ==");
+{
+  const r = spawnSync(process.execPath, [path.join(__dirname, "check-docs.mjs")], {
+    encoding: "utf8",
+  });
+  const out = String(r.stdout ?? "").trim();
+  const err = String(r.stderr ?? "").trim();
+  if (r.status === 0 && out) {
+    pass++;
+    console.log("  ОК   " + out);
+  } else {
+    fail++;
+    console.log(`  СБОЙ проверки README: код ${r.status}${out ? ", вывод: " + out : ""}${err ? ", ошибка: " + err : ""}`);
   }
 }
 

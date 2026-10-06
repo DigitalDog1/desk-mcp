@@ -43,7 +43,8 @@
     "test": "node smoke.mjs",
     "check": "node --check server.mjs",
     "bench": "node bench-tokens.mjs",
-    "bench:full": "node bench-full.mjs"
+    "bench:full": "node bench-full.mjs",
+    "check:docs": "node check-docs.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
