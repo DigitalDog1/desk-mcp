@@ -147,30 +147,30 @@ anything that touches UI Automation.
 
 | Window | Size | One element (`computer_find`) | Whole tree | Compact tree | Picture |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| MiniMax Code | 2576x1416 | 93 tokens, 3159 ms | 471 tokens, 3223 ms | 1313 tokens, 42 ms | 4864 tokens, 139 ms |
-| Discord | 1793x922 | 15 tokens, 4362 ms | 60 tokens, 8005 ms | 67 tokens, 1 ms | 2205 tokens, 149 ms |
-| This page in Edge | 2576x1416 | 97 tokens, 3055 ms | 3232 tokens, 107 ms | 2490 tokens, 46 ms | 4864 tokens, 102 ms |
-| Snipping Tool | 617x343 | 84 tokens, 3061 ms | 4189 tokens, 73 ms | 2969 tokens, 15 ms | 283 tokens, 31 ms |
-| Microsoft Store | 1216x941 | 82 tokens, 3070 ms | 5859 tokens, 80 ms | 4353 tokens, 48 ms | 1526 tokens, 96 ms |
+| Parcel Tracker (WinForms) | 940x640 | 83 tokens, 68 ms | 5011 tokens, 256 ms | 3482 tokens, 113 ms | 803 tokens, 68 ms |
+| Edge | 1265x1380 | 94 tokens, 11 ms | 4858 tokens, 55 ms | 3697 tokens, 42 ms | 2328 tokens, 35 ms |
+| Wallpaper UI | 740x560 | 15 tokens, 100 ms | 1710 tokens, 239 ms | 1492 tokens, 22 ms | 553 tokens, 50 ms |
+| Windows Help | 2504x1226 | 97 tokens, 10 ms | 3178 tokens, 37 ms | 2436 tokens, 31 ms | 4094 tokens, 97 ms |
+| MiniMax Code | 2576x1416 | 93 tokens, 11 ms | 471 tokens, 46 ms | 1313 tokens, 18 ms | 4864 tokens, 86 ms |
 
-- Looking up one element costs 3.4x to 147x less than a picture of the same window,
+- Looking up one element costs 3.2x to 52x less than a picture of the same window,
   and it returns exact bounds and patterns.
 - A whole tree can cost more than the screenshot. `maxDepth`, `maxElements`,
-  `interactiveOnly`, `compact` and `maxChars` pull it back. On one window with a long
-  message list the tree came to 29643 tokens, and `interactiveOnly` alone took that
-  to 1280.
-- `compact` swaps named fields for positional arrays, which saves 23% to 29% on the
-  big trees above. On a small tree it **loses**: the `fields` legend is a fixed
-  overhead, and on the 471-token tree it turned the answer into 1313 tokens. Turn it on
-  for a big tree, off for a small one.
+  `interactiveOnly`, `compact` and `maxChars` pull it back.
+- `compact` swaps named fields for positional arrays, which saves 13% to 31% on the
+  trees above. On a small tree it **loses**: the `fields` legend is a fixed
+  overhead, and on the 471-token tree it turned the answer into 1313 tokens. Turn it
+  on for a big tree, off for a small one.
 - A screenshot costs the same every time, since only window size matters. A big window
   is expensive however empty it is.
-- Reading a window now costs 15 to 525 ms: the window is resolved through `user32`
-  and the traversal starts from that handle. Two rows above are the exceptions, both
-  for the same reason: Discord's tree hits the 8 s budget because Chromium drags on
-  UIA, and MiniMax Code's first read pays that same way.
-- `computer_find` is still 3.0 to 4.4 s. It needs live COM objects to apply the
-  patterns, so it still runs on the PowerShell thread. That one is next on the list.
+- Every path here runs in 10 to 256 ms, with one application running that stalls UI
+  Automation. A few days earlier the same machine gave 3055 to 4362 ms for a single
+  element lookup and 3207 ms for a tree read, because window resolution went through
+  `AutomationElement.RootElement`. It now goes through `user32` and the traversal
+  starts from that handle, so a badly behaved neighbour no longer charges everyone for
+  its stall. Find the window with `EnumWindows`, read from `FromHandle`.
+- Full walk of the demo app, start to finish, including worker start:
+  `node examples/demo.mjs` went from 29.6 s to 1.9 s.
 
 Run `npm run bench` to measure your own windows.
 

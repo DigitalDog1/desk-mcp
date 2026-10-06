@@ -878,6 +878,96 @@ public static class UiaNative
         return SearchJson(titleLike, 0, nameLike, typeName, automationId, maxDepth, limit);
     }
 
+    // Поиск элемента и само действие на STA-потоке.
+    //
+    // Зачем: пока поиск делал PowerShell, его единственный runspace уходил в
+    // UIA, и зависшее окно убивало воркер целиком вместе со всем состоянием
+    // на inflight. Здесь и поиск, и Invoke/SetValue происходят на STA с
+    // жёстким таймаутом, поэтому зависший элемент стоит одного потока, а
+    // воркер переживает и поднимает новый поток для следующего вызова.
+    //
+    // Статусы: ok / notfound / disabled / noPattern / error / unknownAction.
+    // PowerShell по ним решает, что делать дальше: отказаться, отдать
+    // результат или откатиться на пиксельный клик.
+    public static string ActJson(long hwnd, string action, string nameLike, string typeName,
+                                 string automationId, int maxDepth, string value, int limit)
+    {
+        try
+        {
+            List<object[]> hits = SearchCore("", hwnd, nameLike, typeName, automationId, maxDepth, limit);
+            if (hits.Count == 0) return "{\"status\":\"notfound\"}";
+
+            if (action == "find")
+            {
+                StringBuilder items = new StringBuilder(256);
+                for (int i = 0; i < hits.Count; i++)
+                {
+                    if (i > 0) items.Append(',');
+                    items.Append(ElementInfoJson((AutomationElement)hits[i][0], (string)hits[i][1]));
+                }
+                return "{\"status\":\"ok\",\"count\":" + Count(hits.Count) + ",\"elements\":[" + items + "]}";
+            }
+
+            AutomationElement el = (AutomationElement)hits[0][0];
+            string ct = (string)hits[0][1];
+            string info = ElementInfoJson(el, ct);
+
+            // Ложное «сработало» хуже отказа: InvokePattern на
+            // заблокированном элементе в Windows возвращается довольным и
+            // не делает ничего. Поэтому проверяем заранее.
+            bool enabled;
+            try { enabled = el.Current.IsEnabled; } catch (Exception) { enabled = false; }
+            if (!enabled) return "{\"status\":\"disabled\",\"element\":" + info + "}";
+
+            if (action == "invoke")
+            {
+                try
+                {
+                    InvokePattern ip = el.GetCurrentPattern(InvokePattern.Pattern) as InvokePattern;
+                    if (ip == null) return "{\"status\":\"noPattern\",\"element\":" + info + "}";
+                    ip.Invoke();
+                    return "{\"status\":\"ok\",\"via\":\"InvokePattern\",\"element\":" + info + "}";
+                }
+                catch (Exception ex)
+                {
+                    return "{\"status\":\"error\",\"error\":" + J(ex.Message) + ",\"element\":" + info + "}";
+                }
+            }
+
+            if (action == "set_value")
+            {
+                try
+                {
+                    ValuePattern vp = el.GetCurrentPattern(ValuePattern.Pattern) as ValuePattern;
+                    if (vp == null) return "{\"status\":\"noPattern\",\"element\":" + info + "}";
+                    vp.SetValue(value == null ? "" : value);
+                    return "{\"status\":\"ok\",\"via\":\"ValuePattern\",\"element\":" + info + "}";
+                }
+                catch (Exception ex)
+                {
+                    return "{\"status\":\"error\",\"error\":" + J(ex.Message) + ",\"element\":" + info + "}";
+                }
+            }
+
+            return "{\"status\":\"unknownAction\",\"error\":" + J(action) + "}";
+        }
+        catch (Exception ex)
+        {
+            return "{\"status\":\"error\",\"error\":" + J(ex.GetType().Name + ": " + ex.Message) + "}";
+        }
+    }
+
+    public static UiaResult RunActByHwnd(int timeoutMs, long hwnd, string action, string nameLike,
+                                          string typeName, string automationId, int maxDepth,
+                                          string value, int limit)
+    {
+        Func<object> job = delegate
+        {
+            return ActJson(hwnd, action, nameLike, typeName, automationId, maxDepth, value, limit);
+        };
+        return Run(timeoutMs, job);
+    }
+
     public static string SearchJson(string titleLike, long hwnd, string nameLike, string typeName,
                                     string automationId, int maxDepth, int limit)
     {

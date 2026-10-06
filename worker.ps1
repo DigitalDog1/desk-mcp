@@ -456,6 +456,25 @@ if (-not ("UiaNative" -as [type])) {
     }
 }
 
+function Invoke-UiAct([string]$action, $a, [int]$depth, [int]$limit) {
+    # Поиск элемента и действие на STA-потоке нативного слоя. Возвращает
+    # $null, если путь недоступен (нет нативного слоя или окно не нашлось),
+    # тогда вызывающий молча уходит на старый путь из PowerShell.
+    if (-not $script:NativeUia) { return $null }
+    $hwnd = Find-WindowHwnd ([string]$a.title)
+    if ($hwnd -eq 0) { return $null }
+    $argv = @(
+        [int]$script:UiaBudgetMs, $hwnd, $action, [string]$a.name, [string]$a.type,
+        [string]$a.id, [int]$depth, [string]$a.value, [int]$limit
+    )
+    try {
+        return (Invoke-UiaNative 'RunActByHwnd' $argv | ConvertFrom-Json)
+    } catch {
+        # Нативный путь не сработал: это не повод ломать вызов, откатываемся.
+        return $null
+    }
+}
+
 function Invoke-UiaNative([string]$method, [object[]]$argv) {
     $flags = [System.Reflection.BindingFlags]::Public -bor [System.Reflection.BindingFlags]::Static
     $mi = $script:NativeUia.GetMethod($method, $flags)
@@ -1793,9 +1812,15 @@ function Invoke-Tool {
             'find' {
                 $key = "find|$([string]$a.title)|$([string]$a.name)|$([string]$a.type)|$([string]$a.id)|$([string]$a.maxDepth)|$([string]$a.limit)"
                 $result = Get-UiCached $key {
+                    $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
+                    $limit = if ($a.limit) { [int]$a.limit } else { 20 }
+                    # STA-путь: поиск на STA-потоке, без PowerShell в UIA.
+                    $nat = Invoke-UiAct 'find' $a $depth $limit
+                    if ($nat -and $nat.status -eq 'ok') {
+                        return [ordered]@{ count = [int]$nat.count; elements = @($nat.elements) }
+                    }
                     $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
-                                           ([string]$a.id) $(if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }) `
-                                           $(if ($a.limit) { [int]$a.limit } else { 20 })
+                                           ([string]$a.id) $depth $limit
                     if (@($hits).Count -eq 0) { throw "Не найдено ни одного элемента по заданным условиям" }
                     $items = @()
                     foreach ($h in $hits) { $items += ,(Convert-ElementInfo $h) }
@@ -1804,6 +1829,25 @@ function Invoke-Tool {
             }
 
             'invoke' {
+                $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
+                # Сначала STA: поиск и InvokePattern в одном вызове, без
+                # похода PowerShell в UIA. Если окно не нашлось или нативного
+                # слоя нет, Invoke-UiAct вернёт $null и пойдёт старый путь.
+                $nat = Invoke-UiAct 'invoke' $a $depth 1
+                if ($nat) {
+                    if ($nat.status -eq 'disabled') {
+                        throw "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, нажать нельзя. Нажатие отчиталось бы успехом, но ничего не изменит."
+                    }
+                    if ($nat.status -eq 'notfound') {
+                        throw "Элемент '$($a.name)' не найден — нажимать нечего"
+                    }
+                    if ($nat.status -eq 'ok') {
+                        $result = [ordered]@{ ok = $true; via = $nat.via; element = $nat.element }
+                        break
+                    }
+                    # noPattern и error: спускаемся на пиксельный клик ниже
+                }
+
                 $hits = Resolve-Target $a
                 if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден — нажимать нечего" }
                 $pair = @($hits)[0]
@@ -1840,6 +1884,18 @@ function Invoke-Tool {
             }
 
             'set_value' {
+                $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
+                $nat = Invoke-UiAct 'set_value' $a $depth 1
+                if ($nat) {
+                    if ($nat.status -eq 'disabled') {
+                        throw "Элемент '$($nat.element.name)' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
+                    }
+                    if ($nat.status -eq 'notfound') { throw "Элемент '$($a.name)' не найден" }
+                    if ($nat.status -eq 'ok') {
+                        $result = [ordered]@{ ok = $true; via = $nat.via; value = [string]$a.value; element = $nat.element }
+                        break
+                    }
+                }
                 $hits = Resolve-Target $a
                 if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден" }
                 $el = @($hits)[0][0]
@@ -1857,14 +1913,26 @@ function Invoke-Tool {
             }
 
             'select_text' {
-                $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
-                                       ([string]$a.id) $(if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }) 1
-                if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден" }
-                $info = Convert-ElementInfo @($hits)[0]
-                if ($info['enabled'] -eq $false) {
-                    throw "Элемент '$($info['name'])' неактивен (enabled=false): поле отключено, выделять нечего."
+                $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
+                $natInfo = $null
+                $nat = Invoke-UiAct 'find' $a $depth 1
+                if ($nat -and $nat.status -eq 'ok' -and @($nat.elements).Count -gt 0) {
+                    $natInfo = @($nat.elements)[0]
+                    if ($natInfo.enabled -eq $false) {
+                        throw "Элемент '$($natInfo.name)' неактивен (enabled=false): поле отключено, выделять нечего."
+                    }
                 }
-                $r = $info['rect']
+                if (-not $natInfo) {
+                    $hits = Search-UiElements ([string]$a.title) ([string]$a.name) ([string]$a.type) `
+                                           ([string]$a.id) $depth 1
+                    if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден" }
+                    $natInfo = Convert-ElementInfo @($hits)[0]
+                    if ($natInfo['enabled'] -eq $false) {
+                        throw "Элемент '$($natInfo['name'])' неактивен (enabled=false): поле отключено, выделять нечего."
+                    }
+                }
+                $info = $natInfo
+                $r = if ($info['rect']) { $info['rect'] } else { $info.rect }
                 [DeskMcp]::MoveTo($r['x'] + [int]($r['w'] / 2), $r['y'] + [int]($r['h'] / 2))
                 Start-Sleep -Milliseconds 150
                 [DeskMcp]::Click('left', 1)
