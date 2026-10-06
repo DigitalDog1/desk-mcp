@@ -56,3 +56,5 @@ _e_real.mjs
 u_ref.ps1
 _d_*/
 *.tgz
+bench-out.txt
+bench-last.json
