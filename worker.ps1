@@ -441,6 +441,83 @@ if ($env:DESK_UIA_BUDGET_MS) {
     $parsed = 0
     if ([int]::TryParse($env:DESK_UIA_BUDGET_MS, [ref]$parsed) -and $parsed -gt 0) { $script:UiaBudgetMs = $parsed }
 }
+
+# ---- Режимы безопасности для автономного агента -------------------------
+# Всё выключено по умолчанию и включается переменными окружения, поэтому
+# обычное поведение сервера не меняется ни на байт.
+#
+#   DESK_DRY_RUN=1              действия не выполняются, возвращается план
+#   DESK_AUDIT=1                писать журнал вызовов
+#   DESK_AUDIT_PATH=<путь>      куда писать (по умолчанию %TEMP%\desk-mcp-audit.log)
+#   DESK_ALLOW_TITLES=a|b|c     белый список: окно с заголовком обязано
+#                              содержать одну из подстрок, иначе отказ до действия
+$script:DryRun = ($env:DESK_DRY_RUN -eq '1')
+$script:AuditOn = (($env:DESK_AUDIT -eq '1') -or [bool]$env:DESK_AUDIT_PATH)
+$script:AuditPath = if ($env:DESK_AUDIT_PATH) { $env:DESK_AUDIT_PATH } else { Join-Path $env:TEMP 'desk-mcp-audit.log' }
+$script:AllowTitles = @()
+if ($env:DESK_ALLOW_TITLES) {
+    $script:AllowTitles = @($env:DESK_ALLOW_TITLES -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
+# Инструменты, которые что-то меняют: в dry-run они не выполняются.
+# wait не меняет ничего, поэтому в список не входит.
+$script:MutatingTools = @(
+    'click', 'move', 'mouse_move', 'drag', 'scroll', 'mouse_button',
+    'type', 'key', 'key_down', 'key_up',
+    'invoke', 'set_value', 'select_text',
+    'focus', 'close_window', 'launch', 'desktop'
+)
+
+function Get-TargetTitle($a) {
+    if (-not $a) { return '' }
+    foreach ($k in @('title', 'window', 'windowTitle')) {
+        if ($a.PSObject.Properties.Name -contains $k -and $a.$k) { return [string]$a.$k }
+    }
+    return ''
+}
+
+function Assert-TitleAllowed([string]$tool, $a) {
+    if ($script:AllowTitles.Count -eq 0) { return }
+    $title = Get-TargetTitle $a
+    if ($title -eq '') { return }
+    foreach ($p in $script:AllowTitles) {
+        if ($title.ToLowerInvariant().Contains($p.ToLowerInvariant())) { return }
+    }
+    throw "Белый список окон не пропускает '$title'. Разрешено: $($script:AllowTitles -join ', ')"
+}
+
+function New-DryRunPlan([string]$tool, $a) {
+    $plan = [ordered]@{}
+    foreach ($p in @($a.PSObject.Properties)) {
+        $v = $p.Value
+        if ($v -is [string] -and $v.Length -gt 120) { $v = $v.Substring(0, 120) + '...' }
+        if ($v -is [object[]]) { $v = "[$($v.Count) значений]" }
+        $plan[$p.Name] = $v
+    }
+    return [ordered]@{
+        ok = $true
+        dryRun = $true
+        tool = $tool
+        note = 'Сухой прогон: действие не выполнялось, показано что было бы сделано'
+        would = $plan
+    }
+}
+
+function Write-AuditLog([string]$tool, $a, $started, [string]$outcome, $result) {
+    if (-not $script:AuditOn) { return }
+    try {
+        $ms = [int]((Get-Date) - $started).TotalMilliseconds
+        $title = Get-TargetTitle $a
+        $via = ''
+        if ($result -and $result.PSObject.Properties.Name -contains 'via') { $via = [string]$result.via }
+        $line = '{0} tool={1} title="{2}" ms={3} outcome={4} via={5} dryRun={6}' -f `
+            $started.ToString('yyyy-MM-dd HH:mm:ss'), $tool, $title, $ms, $outcome, $via, $script:DryRun
+        [System.IO.File]::AppendAllText($script:AuditPath, $line + [Environment]::NewLine,
+            (New-Object System.Text.UTF8Encoding($false)))
+    } catch {
+        # Журнал не имеет права ломать вызов. Тишина здесь правильнее ошибки.
+    }
+}
 if (-not ("UiaNative" -as [type])) {
     $nativePath = Join-Path $PSScriptRoot 'uia-native.cs'
     if (Test-Path -LiteralPath $nativePath) {
@@ -2068,14 +2145,31 @@ while ($true) {
     if ($line.Trim() -eq '') { continue }
 
     $id = 0
+    $tool = ''
+    $a = $null
+    $started = Get-Date
+    $outcome = 'ok'
+    $result = $null
     try {
         $req = $line | ConvertFrom-Json
         $id = $req.id
-        $tool = $req.tool
+        $tool = [string]$req.tool
         $a = $req.args
-        $result = Invoke-Tool $tool $a
+
+        # Белый список проверяется до всего, включая сухой прогон: иначе
+        # план на запрещённое окно выглядел бы как разрешённое действие.
+        Assert-TitleAllowed $tool $a
+
+        if ($script:DryRun -and ($script:MutatingTools -contains $tool)) {
+            $result = New-DryRunPlan $tool $a
+        } else {
+            $result = Invoke-Tool $tool $a
+        }
         Send-Response $id $true $result $null
     } catch {
+        $outcome = 'error'
         Send-Response $id $false $null $_.Exception.Message
+    } finally {
+        Write-AuditLog $tool $a $started $outcome $result
     }
 }

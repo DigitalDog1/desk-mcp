@@ -351,6 +351,43 @@ doing the arithmetic:
 The test suite is read only on purpose: screenshots, windows, trees, OCR, clipboard,
 CDP reads. It does not move your cursor.
 
+## Running an agent without supervision
+
+`confirm: true` on `computer_close_window` and `computer_launch` is a speed bump
+against an agent that follows instructions, not a security boundary. For unattended
+use there are three switches, all off by default and all set by environment
+variable, so normal behaviour does not change.
+
+```bash
+# See what the agent would do, without letting it do anything
+DESK_DRY_RUN=1 npx -y desk-mcp
+
+# Write every call with its parameters, duration and outcome
+DESK_AUDIT=1 npx -y desk-mcp
+DESK_AUDIT_PATH=C:\logs\desk-mcp.jsonl npx -y desk-mcp   # custom path
+
+# Refuse any window whose title does not contain one of the allowed substrings,
+# checked before the action runs, dry run included
+DESK_ALLOW_TITLES="Блокнот|Notepad" npx -y desk-mcp
+```
+
+In dry run every mutating tool returns a plan instead of acting, and read-only tools
+(`computer_read_screen`, `computer_find`, `computer_screenshot`, `computer_ocr`) keep
+working, because a dry run is only useful if it can still read. The allowlist is
+checked before everything else, so a plan for a forbidden window comes back as a
+refusal rather than as a green light.
+
+The audit line is one line per call:
+
+```
+2026-10-06 10:07:02 tool=invoke title="Parcel Tracker" ms=33 outcome=ok via= dryRun=True
+2026-10-06 10:07:02 tool=invoke title="Roblox" ms=6 outcome=error via= dryRun=True
+```
+
+What none of this gives you is isolation: an agent in your session can still grab
+your keyboard while you type. `computer_desktop` moves windows to another virtual
+desktop, which is the closest thing here to being out of the way.
+
 ## Limitations
 
 - **Windows only.** This is a Windows server and it uses Windows APIs throughout.
