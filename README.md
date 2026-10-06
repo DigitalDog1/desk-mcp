@@ -355,7 +355,7 @@ CDP reads. It does not move your cursor.
 
 `confirm: true` on `computer_close_window` and `computer_launch` is a speed bump
 against an agent that follows instructions, not a security boundary. For unattended
-use there are three switches, all off by default and all set by environment
+use there are four switches, all off by default and all set by environment
 variable, so normal behaviour does not change.
 
 ```bash
@@ -369,7 +369,16 @@ DESK_AUDIT_PATH=C:\logs\desk-mcp.jsonl npx -y desk-mcp   # custom path
 # Refuse any window whose title does not contain one of the allowed substrings,
 # checked before the action runs, dry run included
 DESK_ALLOW_TITLES="Блокнот|Notepad" npx -y desk-mcp
+
+# Take tools out of the server entirely, comma separated, * allowed anywhere:
+# computer_click, computer_*_text, computer_browser_*
+DESK_DISABLE_TOOLS=computer_click,computer_type npx -y desk-mcp
 ```
+
+A disabled tool is not registered at all. The agent does not see it in the tool
+list and cannot call it, and `computer_batch` refuses that step by name instead of
+running it behind your back. The list of what got cut goes to stderr on startup, so
+the restriction is visible before the first call rather than after it.
 
 In dry run every mutating tool returns a plan instead of acting, and read-only tools
 (`computer_read_screen`, `computer_find`, `computer_screenshot`, `computer_ocr`) keep

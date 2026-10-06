@@ -301,7 +301,10 @@ async function callUi(tool, args, timeoutMs = UI_TIMEOUT_MS) {
 // Инструменты, которые ходят в UI Automation. У batch они идут через callUi,
 // иначе breaker обходится целиком: batch исполняется в воркере рекурсивно и
 // минует любые проверки на стороне сервера.
-const UI_TOOLS = new Set(["read_screen", "element_at", "find", "invoke", "set_value", "select_text", "verify"]);
+const UI_TOOLS = new Set([
+  "read_screen", "element_at", "find", "invoke", "set_value", "select_text", "verify",
+  "wait_element", "select", "read_table",
+]);
 
 // --- сервер -------------------------------------------------------------------
 
@@ -309,7 +312,35 @@ const server = new McpServer({ name: "desk-mcp", version: "1.5.0" });
 
 const ok = (data) => ({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
 
-server.registerTool(
+// --- что можно отключить ------------------------------------------------------
+// DESK_DISABLE_TOOLS=computer_click,computer_*_text,computer_browser_*
+//
+// Отключённый инструмент не регистрируется вовсе: агент не видит его в списке
+// и не может вызвать, а computer_batch по такому шагу получает прямой отказ.
+// Молча гасить вызов было бы хуже отказа: агент решил бы, что инструмент есть,
+// и потратил на него несколько попыток подряд.
+//
+// Поддерживается `*` в любом месте имени: computer_*_text или *click. Без
+// переменной поведение не меняется ни на йоту.
+const DISABLE_PATTERNS = (process.env.DESK_DISABLE_TOOLS ?? "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean)
+  .map((p) => new RegExp("^" + p.split("*").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$"));
+
+const isDisabled = (name) =>
+  DISABLE_PATTERNS.length > 0 && DISABLE_PATTERNS.some((re) => re.test(String(name).toLowerCase()));
+
+const disabledTools = [];
+function reg(name, config, handler) {
+  if (isDisabled(name)) {
+    disabledTools.push(name);
+    return;
+  }
+  server.registerTool(name, config, handler);
+}
+
+reg(
   "computer_screenshot",
   {
     title: "Снимок экрана",
@@ -338,7 +369,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+reg(
   "computer_screeninfo",
   {
     title: "Информация об экранах",
@@ -348,7 +379,7 @@ server.registerTool(
   R(async () => ok(await worker.call("screeninfo", {}))),
 );
 
-server.registerTool(
+reg(
   "computer_permissions",
   {
     title: "Проверка прав",
@@ -360,7 +391,7 @@ server.registerTool(
   R(async () => ok(await worker.call("permissions", {}))),
 );
 
-server.registerTool(
+reg(
   "computer_click",
   {
     title: "Клик мышью",
@@ -387,13 +418,13 @@ server.registerTool(
   R(async (a) => ok(await worker.call("click", a))),
 );
 
-server.registerTool(
+reg(
   "computer_move",
   { title: "Навести мышь", description: "Перемещает курсор в точку, ничего не нажимая.", inputSchema: { x: z.number().int(), y: z.number().int() } },
   R(async (a) => ok(await worker.call("move", a))),
 );
 
-server.registerTool(
+reg(
   "computer_mouse_move",
   {
     title: "Сдвинуть мышь относительно",
@@ -411,7 +442,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("mouse_move", a))),
 );
 
-server.registerTool(
+reg(
   "computer_drag",
   { title: "Перетащить", description: "Зажимает левую кнопку в одной точке и тянет в другую (слайдеры, DnD, перемещение окон).", inputSchema: {
     fromX: z.number().int(), fromY: z.number().int(), toX: z.number().int(), toY: z.number().int(),
@@ -421,7 +452,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("drag", a))),
 );
 
-server.registerTool(
+reg(
   "computer_scroll",
   { title: "Колесо мыши", description: "Прокручивает колесом. Положительный dy — вниз, как везде. Укажи x,y чтобы навести на нужный элемент.", inputSchema: {
     x: z.number().int().optional(), y: z.number().int().optional(),
@@ -430,7 +461,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("scroll", a))),
 );
 
-server.registerTool(
+reg(
   "computer_type",
   {
     title: "Ввести текст",
@@ -443,7 +474,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("type", a))),
 );
 
-server.registerTool(
+reg(
   "computer_key",
   {
     title: "Нажать клавиши",
@@ -456,13 +487,13 @@ server.registerTool(
   R(async (a) => ok(await worker.call("key", a))),
 );
 
-server.registerTool(
+reg(
   "computer_windows",
   { title: "Список окон", description: "Верхнеуровневые окна: заголовок, pid, класс, границы, видимость.", inputSchema: { filter: z.string().optional().describe("подстрока заголовка") } },
   R(async (a) => ok(await worker.call("windows", a))),
 );
 
-server.registerTool(
+reg(
   "computer_focus",
   {
     title: "Перевести фокус на окно",
@@ -474,7 +505,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("focus", a))),
 );
 
-server.registerTool(
+reg(
   "computer_wait_window",
   {
     title: "Дождаться окна",
@@ -484,13 +515,13 @@ server.registerTool(
   R(async (a) => ok(await worker.call("wait_window", a, a.timeoutSec * 1000 + 5000))),
 );
 
-server.registerTool(
+reg(
   "computer_close_window",
   { title: "Закрыть окно", description: "Закрывает окно по подстроке заголовка. force — убить процесс. Требует confirm: true: действие разрушительное, а с force ещё и теряет несохранённые данные.", inputSchema: { title: z.string(), force: z.boolean().optional().default(false), confirm: z.boolean().optional() } },
   R(async (a) => ok(await worker.call("close_window", a))),
 );
 
-server.registerTool(
+reg(
   "computer_launch",
   { title: "Запустить программу", description: "Запускает исполняемый файл. Путь до .exe обязателен. Требует confirm: true.", inputSchema: {
     path: z.string(), args: z.array(z.string()).optional(), hidden: z.boolean().optional().default(false),
@@ -499,7 +530,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("launch", a))),
 );
 
-server.registerTool(
+reg(
   "computer_read_screen",
   {
     title: "Прочитать дерево UI",
@@ -532,7 +563,7 @@ server.registerTool(
   R(async (a) => ok(await callUi("read_screen", a))),
 );
 
-server.registerTool(
+reg(
   "computer_element_at",
   {
     title: "Что в этой точке",
@@ -544,19 +575,19 @@ server.registerTool(
   R(async (a) => ok(await callUi("element_at", a))),
 );
 
-server.registerTool(
+reg(
   "computer_clipboard_get",
   { title: "Прочитать буфер", description: "Текст из буфера обмена. ВНИМАНИЕ: Get-Clipboard -Path ложит файл, а не текст — здесь только текст.", inputSchema: {} },
   R(async (a) => ok(await worker.call("clipboard_get", a))),
 );
 
-server.registerTool(
+reg(
   "computer_clipboard_set",
   { title: "Записать в буфер", description: "Кладёт текст в буфер обмена.", inputSchema: { text: z.string() } },
   R(async (a) => ok(await worker.call("clipboard_set", a))),
 );
 
-server.registerTool(
+reg(
   "computer_selftest",
   {
     title: "Самопроверка",
@@ -568,7 +599,7 @@ server.registerTool(
   R(async () => ok(await worker.call("selftest", {}))),
 );
 
-server.registerTool(
+reg(
   "computer_bench",
   {
     title: "Тестовый стенд",
@@ -582,7 +613,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("bench", a))),
 );
 
-server.registerTool(
+reg(
   "computer_desktop",
   {
     title: "Виртуальные рабочие столы",
@@ -600,7 +631,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("desktop", a))),
 );
 
-server.registerTool(
+reg(
   "computer_batch",
   {
     title: "Пачка действий",
@@ -628,8 +659,9 @@ const WORKER_TOOLS = new Set([
   "active_window", "bench", "click", "clipboard_get", "clipboard_set", "close_window",
   "cursor", "desktop", "drag", "element_at", "find", "focus", "invoke", "key", "key_down",
   "key_up", "launch", "mouse_button", "mouse_move", "move", "ocr", "permissions",
-  "read_screen", "screeninfo", "screenshot", "scroll", "select_text", "set_frame",
-  "set_value", "type", "verify", "wait", "wait_window", "windows",
+  "polyline", "read_screen", "read_table", "screeninfo", "screenshot", "scroll", "select",
+  "select_text", "set_frame", "set_value", "type", "verify", "wait", "wait_element",
+  "wait_window", "windows",
 ]);
 
 const TOOL_ALIAS = {
@@ -656,6 +688,16 @@ async function runBatch(steps) {
       if (stopOnError) { stoppedAt = i; break; }
       continue;
     }
+    // Отключённый через DESK_DISABLE_TOOLS инструмент batch тоже не выполняет:
+    // иначе список отключённых обходится одной пачкой, и защита дырявится.
+    if (isDisabled(given) || isDisabled(`computer_${tool}`)) {
+      out.push({
+        index: i, tool: given, ok: false,
+        error: `Инструмент '${given}' отключён через DESK_DISABLE_TOOLS`,
+      });
+      if (stopOnError) { stoppedAt = i; break; }
+      continue;
+    }
     try {
       const data = UI_TOOLS.has(tool)
         ? await callUi(tool, args)
@@ -674,7 +716,7 @@ async function runBatch(steps) {
   };
 }
 
-server.registerTool(
+reg(
   "computer_ocr",
   {
     title: "Распознать текст на экране",
@@ -691,7 +733,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("ocr", a, 45_000))),
 );
 
-server.registerTool(
+reg(
   "computer_find",
   {
     title: "Найти элемент",
@@ -714,7 +756,7 @@ server.registerTool(
   R(async (a) => ok(await callUi("find", a))),
 );
 
-server.registerTool(
+reg(
   "computer_invoke",
   {
     title: "Нажать элемент",
@@ -733,7 +775,7 @@ server.registerTool(
   R(async (a) => ok(await callUi("invoke", a))),
 );
 
-server.registerTool(
+reg(
   "computer_set_value",
   {
     title: "Записать значение поля",
@@ -753,7 +795,7 @@ server.registerTool(
   R(async (a) => ok(await callUi("set_value", a))),
 );
 
-server.registerTool(
+reg(
   "computer_select",
   {
     title: "Выбрать значение",
@@ -774,7 +816,7 @@ server.registerTool(
   R(async (a) => ok(await callUi("select", a))),
 );
 
-server.registerTool(
+reg(
   "computer_read_table",
   {
     title: "Прочитать таблицу",
@@ -798,7 +840,7 @@ server.registerTool(
   R(async (a) => ok(await callUi("read_table", a))),
 );
 
-server.registerTool(
+reg(
   "computer_polyline",
   {
     title: "Штрих по точкам",
@@ -814,7 +856,7 @@ server.registerTool(
   R(async (a) => ok(await callUi("polyline", a))),
 );
 
-server.registerTool(
+reg(
   "computer_select_text",
   {
     title: "Выделить текст поля",
@@ -827,7 +869,7 @@ server.registerTool(
   R(async (a) => ok(await callUi("select_text", a))),
 );
 
-server.registerTool(
+reg(
   "computer_verify_state",
   {
     title: "Проверить состояние",
@@ -853,7 +895,7 @@ server.registerTool(
   R(async (a) => ok(await callUi("verify", a))),
 );
 
-server.registerTool(
+reg(
   "computer_window_set_frame",
   {
     title: "Передвинуть/изменить размер окна",
@@ -871,13 +913,13 @@ server.registerTool(
   R(async (a) => ok(await worker.call("set_frame", a))),
 );
 
-server.registerTool(
+reg(
   "computer_active_window",
   { title: "Активное окно", description: "Какое окно сейчас в фокусе: pid, процесс, заголовок.", inputSchema: {} },
   R(async () => ok(await worker.call("active_window", {}))),
 );
 
-server.registerTool(
+reg(
   "computer_key_down",
   {
     title: "Зажать клавишу",
@@ -890,13 +932,13 @@ server.registerTool(
   R(async (a) => ok(await worker.call("key_down", a))),
 );
 
-server.registerTool(
+reg(
   "computer_key_up",
   { title: "Отпустить клавишу", description: "Отпускает ранее зажатую через computer_key_down.", inputSchema: { key: z.string() } },
   R(async (a) => ok(await worker.call("key_up", a))),
 );
 
-server.registerTool(
+reg(
   "computer_wait",
   {
     title: "Пауза",
@@ -907,7 +949,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("wait", a))),
 );
 
-server.registerTool(
+reg(
   "computer_wait_element",
   {
     title: "Ждать элемент",
@@ -931,7 +973,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("wait_element", a))),
 );
 
-server.registerTool(
+reg(
   "computer_mouse_button",
   {
     title: "Зажать/отпустить кнопку мыши",
@@ -945,7 +987,7 @@ server.registerTool(
   R(async (a) => ok(await worker.call("mouse_button", a))),
 );
 
-server.registerTool(
+reg(
   "computer_cursor",
   { title: "Позиция курсора", description: "Где сейчас курсор мыши.", inputSchema: {} },
   R(async () => ok(await worker.call("cursor", {}))),
@@ -1183,7 +1225,7 @@ const DESCENDANTS_JS = (selector) => `(() => {
   return JSON.stringify({ root: { tag: root.tagName.toLowerCase(), text: (root.innerText || "").toString().trim().slice(0, 300) }, children: out });
 })()`;
 
-server.registerTool(
+reg(
   "computer_browser_start",
   {
     title: "Запустить браузер с CDP",
@@ -1282,7 +1324,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+reg(
   "computer_browser_list",
   {
     title: "Вкладки CDP",
@@ -1295,7 +1337,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+reg(
   "computer_browser_tree",
   {
     title: "DOM-дерево вкладки",
@@ -1318,7 +1360,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+reg(
   "computer_browser_descendants",
   {
     title: "Поддерево элемента",
@@ -1335,7 +1377,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+reg(
   "computer_browser_click",
   {
     title: "Клик по элементу страницы",
@@ -1425,7 +1467,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+reg(
   "computer_browser_eval",
   {
     title: "Выполнить JS на странице",
@@ -1448,6 +1490,11 @@ async function main() {
   process.stderr.write(`[desk-mcp] воркер готов: pid ${ready.pid}, PowerShell ${ready.powershell}\n`);
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  // Список отключённых уходит в stderr, а не в ответ на вызов: иначе агент
+  // узнает о запрете постфактум, уже потратив на него попытку.
+  if (disabledTools.length) {
+    process.stderr.write(`[desk-mcp] DESK_DISABLE_TOOLS: отключено ${disabledTools.length}: ${disabledTools.join(", ")}\n`);
+  }
   process.stderr.write("[desk-mcp] MCP-сервер слушает stdio\n");
 }
 

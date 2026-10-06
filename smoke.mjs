@@ -425,5 +425,54 @@ await check("computer_read_screen",
   }
 }
 
+// Отключение инструментов живёт в server.mjs на этапе регистрации, поэтому
+// проверяется на втором сервере с переменной окружения: в общем прогоне её нет.
+// Проверяем все три обхода — список, прямой вызов и пачку, иначе защита дырявится.
+console.log("== отключение инструментов (DESK_DISABLE_TOOLS) ==");
+{
+  const t3 = new StdioClientTransport({
+    command: "node",
+    args: [path.join(__dirname, "server.mjs")],
+    stderr: "pipe",
+    env: { ...process.env, DESK_DISABLE_TOOLS: "computer_click,computer_*_text,computer_read_table" },
+  });
+  const c3 = new Client({ name: "smoke-disable", version: "1.0.0" });
+  const gone = ["computer_click", "computer_select_text", "computer_read_table"];
+  try {
+    await c3.connect(t3);
+    const names = (await c3.listTools()).tools.map((x) => x.name);
+    const missing = gone.filter((n) => !names.includes(n));
+    let direct = "вызов прошёл";
+    try {
+      const r = await c3.callTool({ name: "computer_click", arguments: { x: 1, y: 1 } });
+      // Отсутствующий инструмент SDK может отдать как исключение, а может как
+      // результат с isError — оба варианта означают одно и то же.
+      if (r.isError) direct = r.content?.[0]?.text ?? "";
+    } catch (e) {
+      direct = e.message;
+    }
+    const batch = await c3.callTool({
+      name: "computer_batch",
+      arguments: { steps: [{ tool: "computer_click", args: { x: 1, y: 1 } }] },
+    });
+    const bt = batch.content?.[0]?.text ?? "";
+    const alive = names.includes("computer_active_window");
+    const good = missing.length === gone.length && alive
+      && /not found/i.test(direct) && /DESK_DISABLE_TOOLS/.test(bt);
+    if (good) {
+      pass++;
+      console.log(`  ОК   отключено ${missing.length} из 3 (прямой вызов и batch тоже отказали), лишние инструменты целы`);
+    } else {
+      fail++;
+      console.log(`  СБОЙ DESK_DISABLE_TOOLS: пропало [${missing.join(",")}], вызов='${direct.slice(0, 60)}', batch='${bt.slice(0, 100)}'`);
+    }
+  } catch (e) {
+    fail++;
+    console.log(`  ОШИБКА DESK_DISABLE_TOOLS: ${e.message.slice(0, 200)}`);
+  } finally {
+    try { await c3.close(); } catch { /* уже закрыт */ }
+  }
+}
+
 console.log(`\nИТОГ: ${pass} ок, ${fail} провалов, ${skipped} пропущено`);
 await c.close();
