@@ -141,40 +141,84 @@ to `hoverFirst: true` for pixel clicks into an app you have not tried yet.
 
 ## What it costs, measured
 
-Text tokens are `chars / 4`, image tokens follow Anthropic's `width * height / 750`.
-Measured with a Chromium game running on the machine, which is the worst case for
-anything that touches UI Automation.
+`npm run bench:full` walks every visible window, measures each read several times,
+takes the median, and then prints the cases where this approach loses. Text tokens
+are `chars / 4`, image tokens follow Anthropic's `width * height / 750`. Numbers
+below come from one run on Windows 10, i5-12400F, Node 24, with the windows that
+happened to be open.
 
-| Window | Size | One element (`computer_find`) | Whole tree | Compact tree | Picture |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Parcel Tracker (WinForms) | 940x640 | 83 tokens, 68 ms | 5011 tokens, 256 ms | 3482 tokens, 113 ms | 803 tokens, 68 ms |
-| Edge | 1265x1380 | 94 tokens, 11 ms | 4858 tokens, 55 ms | 3697 tokens, 42 ms | 2328 tokens, 35 ms |
-| Wallpaper UI | 740x560 | 15 tokens, 100 ms | 1710 tokens, 239 ms | 1492 tokens, 22 ms | 553 tokens, 50 ms |
-| Windows Help | 2504x1226 | 97 tokens, 10 ms | 3178 tokens, 37 ms | 2436 tokens, 31 ms | 4094 tokens, 97 ms |
-| MiniMax Code | 2576x1416 | 93 tokens, 11 ms | 471 tokens, 46 ms | 1313 tokens, 18 ms | 4864 tokens, 86 ms |
+| Window | Size | `find` | Whole tree | `compact` | Filtered tree | Repeat (`auto`) | Picture | OCR |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Parcel Tracker (WinForms) | 940x640 | 83 | 12386 | 9052 | 2595 | 38 | 803 | 4389 |
+| Paint | 1843x1005 | 83 | 8247 | 6136 | 1716 | 38 | 2470 | 5683 |
+| Edge (page) | 1265x1380 | 94 | 14105 | 10845 | 154 | 38 | 2328 | 5496 |
+| Wallpaper UI | 740x560 | 20 | 1710 | 1999 | 127 | none | 553 | 244 |
+| Windows Help | 2504x1226 | 97 | 16158 | 12448 | 163 | 38 | 4094 | 7939 |
+| MiniMax Code | 2576x1416 | 93 | 2515 | 1950 | 142 | 38 | 4864 | 8534 |
 
-- Looking up one element costs 3.2x to 52x less than a picture of the same window,
-  and it returns exact bounds and patterns.
-- A whole tree can cost more than the screenshot. `maxDepth`, `maxElements`,
-  `interactiveOnly`, `compact` and `maxChars` pull it back.
-- `compact` swaps named fields for positional arrays, which saves 13% to 31% on the
-  trees above. On a small tree it **loses**: the `fields` legend is a fixed
-  overhead, and on the 471-token tree it turned the answer into 1313 tokens. Turn it
-  on for a big tree, off for a small one.
-- A screenshot costs the same every time, since only window size matters. A big window
-  is expensive however empty it is.
-- Every path here runs in 10 to 256 ms, with one application running that stalls UI
-  Automation. A few days earlier the same machine gave 3055 to 4362 ms for a single
-  element lookup and 3207 ms for a tree read, because window resolution went through
-  `AutomationElement.RootElement`. It now goes through `user32` and the traversal
-  starts from that handle, so a badly behaved neighbour no longer charges everyone for
-  its stall. Find the window with `EnumWindows`, read from `FromHandle`.
-- Full walk of the demo app, start to finish, including worker start:
-  `node examples/demo.mjs` went from 29.6 s to 1.9 s.
+Filtered tree is `maxDepth: 4, interactiveOnly: true, compact: true`. Repeat is the
+same read again through `mode: auto` carrying the token from the previous answer.
 
-Run `npm run bench` to measure your own windows.
+Read honestly, this table is not a victory lap:
 
-## The 42 tools
+- **An unfiltered tree costs 3 to 15 times more than a picture of the same window.**
+  The claim that structure is cheaper was true of the filtered case, and the filter
+  was doing all the work.
+- What the tokens buy is addresses. Parcel Tracker gives 87 named elements at 142
+  tokens each; the picture gives none, and every click on it is a guess about
+  coordinates that go stale. On Edge and Windows Help, filtering brings the tree to
+  154 and 163 tokens, which is cheaper than the picture and fully addressable.
+- `compact` saves 13% to 31% on a big tree and **loses** on a small one: on
+  Wallpaper UI it turned 1710 tokens into 1999, because the `fields` legend is a
+  fixed cost.
+- A repeat read through `mode: auto` costs 38 tokens against 12386 for the first
+  one. That is the cheapest line in the table and the reason to send the token back.
+- OCR is the weakest reader of a window and the strongest one when the coordinates
+  are known: a 420x40 strip costs 296 tokens against 2595 for the filtered tree, and
+  a picture of that same strip costs 23.
+- Walking the tree is slower than taking the picture: 140 ms against 28 ms on Parcel
+  Tracker, 111 against 37 on Edge. UIA is COM into another process.
+
+### Where this loses
+
+- **Coordinates are already known.** Reading a whole window to get one field costs 6
+  to 9 times more than OCR of that field.
+- **No filter, and the question is visual.** A picture is 3 to 15 times cheaper, and
+  it is the only one that answers "what colour is the button" or "is the layout
+  broken". Those answers are not in the structure at any price.
+- **A stale token.** Every `mode: auto` answer returns a new token and the next call
+  must carry it. Reuse the old one and the whole tree comes back, 218 to 426 times
+  more tokens. That is deliberate: a diff against a baseline the caller no longer
+  holds would be invented.
+- **A window that repaints itself.** Changes pile up, the delta outgrows the full
+  view, and the server returns the full view.
+- **No accessibility tree** (games, UWP, protected content). The answer arrives as
+  `kind: fallback` with OCR text and no delta, which is what Wallpaper UI shows above.
+- **A grid without a header row.** `TablePatternInformation` in .NET has no "this row
+  is the header" flag, so `computer_read_table` treats the first row as the header by
+  convention. `headers: false` reads every row as data.
+
+### What this benchmark does not measure
+
+- The numbers belong to this machine and to the windows that were open. Another
+  machine gives another table, possibly another order of magnitude.
+- It measures the cost of reading, not whether an agent picked the right tool.
+- Nothing is loaded on purpose: no busy app in parallel, no window being resized, no
+  multi-monitor DPI change.
+- Text tokens use `chars / 4`. Cyrillic really costs more, and both sides lose the
+  same way.
+- Image tokens follow the published formulas. The real bill depends on the model and
+  on how the client tiles the picture.
+
+`npm run bench` is the older token-only comparison, `npm run bench:full` is this
+one. History worth keeping: a few days earlier the same machine needed 3055 to 4362
+ms for a single element lookup and 3207 ms for a tree read, because window resolution
+went through `AutomationElement.RootElement`. It now goes through `user32` and starts
+from that handle, so a badly behaved neighbour no longer charges everyone for its
+stall. Full walk of the demo app, start to finish, including worker start:
+`node examples/demo.mjs` went from 29.6 s to 1.9 s.
+
+## The 46 tools
 
 **Eyes**
 
@@ -190,7 +234,13 @@ Run `npm run bench` to measure your own windows.
 
 - `computer_read_screen`: UI Automation, automatic fallback to MSAA, automatic growth
   of traversal depth, and OCR when both trees are empty (the answer then carries
-  `backend` and `degraded`).
+  `backend` and `degraded`). `mode: auto` plus `since` returns only what changed
+  since the token of the previous answer, and `compact`, `maxChars`, `maxDepth`,
+  `maxElements` and `interactiveOnly` pay off more than any other argument here.
+- `computer_read_table`: headers and rows of a grid, list or Details view through
+  `GridPattern`, one call instead of walking the tree or doing N*M lookups. The first
+  row is read as the header **by convention**, because .NET's
+  `TablePatternInformation` has no flag for it; `headers: false` disables that.
 - `computer_find`: one element by name, role or `automationId`.
 - `computer_element_at`: the chain of elements under a point.
 - `computer_browser_tree`, `computer_browser_descendants`, `computer_browser_eval`,
@@ -203,11 +253,18 @@ Run `npm run bench` to measure your own windows.
   `computer_mouse_move`, `computer_drag`, `computer_scroll`, `computer_mouse_button`,
   `computer_type`, `computer_key`, `computer_key_down` / `computer_key_up`,
   `computer_wait`.
+- `computer_polyline`: one continuous stroke through a list of points. N separate
+  drags lift the pen on every vertex and the line arrives as broken segments.
 - `computer_invoke`: presses through `InvokePattern` **without taking the mouse**
   and without bringing the window forward. This is what the clip above uses.
 - `computer_set_value`: writes through `ValuePattern`, also without focus.
+- `computer_select`: picks a value in a dropdown, combo box, list or tab through
+  `SelectionItem` and `ExpandCollapse`, opening and closing it again by itself. A
+  pattern that runs without selecting anything comes back as `notSelected`, which is
+  not success.
 - `computer_batch`: up to 50 tools in one call, executed step by step so every step
-  obeys the same budgets.
+  obeys the same budgets. A tool disabled through `DESK_DISABLE_TOOLS` is refused by
+  name here too.
 
 **Windows and desktop**
 
@@ -220,9 +277,20 @@ Run `npm run bench` to measure your own windows.
 
 - `computer_verify_state`: predicates `exists`, `value_equals`, `enabled`,
   `selected`. `unknown` is reported as `unknown` and is never counted as success.
+- `computer_wait_element`: waits for an element to appear, disappear or reach a state
+  (`enabled`, `disabled`, `visible`, `offscreen`, `on`, `off`, `indeterminate`)
+  instead of sleeping and hoping. Running out of budget is not an error: the answer is
+  `satisfied: false` with `reason: timeout`, because "did not arrive" and "the tool
+  broke" must stay different things.
 - `computer_invoke`, `computer_set_value` and `computer_select_text` refuse on
   `enabled: false`, because `InvokePattern` on a disabled control returns happily in
   Windows and does nothing at all.
+- Every refusal carries a machine-readable `code` next to the human sentence
+  (`ElementNotFound`, `ElementDisabled`, `OptionNotFound`, `PatternUnavailable`,
+  `NotSelected`, `WindowNotFound`, `NeedsConfirm`, `BlockedByList`, `InvalidArgument`,
+  `NotSupported`, `WorkerRestarted`, `Timeout`, `CaptureFailed`, `InputBlocked`), so
+  an agent can tell "there is no such element" from "the element is there but
+  disabled" without parsing Russian.
 - `computer_selftest` checks the whole channel at once.
 
 ## How it works
@@ -419,7 +487,7 @@ desktop, which is the closest thing here to being out of the way.
 npm test
 ```
 
-Expected tail: `ИТОГ: 49 ок, 0 провалов, N пропущено`. The harness prints in Russian:
+Expected tail: `ИТОГ: 68 ок, 0 провалов, N пропущено`. The harness prints in Russian:
 `ок` is passed, `провалов` is failed, `пропущено` is skipped. A skipped check means
 some window on the machine refused to answer UI Automation (Steam, 1C, old WPF hold
 the COM call open) and the breaker caught it. That is a property of somebody else's
