@@ -535,16 +535,21 @@ if (-not ("UiaNative" -as [type])) {
 
 function Invoke-UiAct([string]$action, $a, [int]$depth, [int]$limit) {
     # Поиск элемента и действие на STA-потоке нативного слоя. Возвращает
-    # $null, если путь недоступен (нет нативного слоя или окно не нашлось),
-    # тогда вызывающий молча уходит на старый путь из PowerShell.
-    if (-not $script:NativeUia) { return $null }
-    $hwnd = Find-WindowHwnd ([string]$a.title)
-    if ($hwnd -eq 0) { return $null }
-    $argv = @(
-        [int]$script:UiaBudgetMs, $hwnd, $action, [string]$a.name, [string]$a.type,
-        [string]$a.id, [int]$depth, [string]$a.value, [int]$limit
-    )
+    # $null, если путь недоступен (нет нативного слоя, окно не нашлось,
+    # любая нештатная ситуация), тогда вызывающий молча уходит на старый
+    # путь из PowerShell.
+    #
+    # try охватывает ВСЁ тело, а не только вызов нативного метода: если
+    # упадёт даже поиск окна, контракт "молча уходи на фоллбэк" должен
+    # выдержать и это.
     try {
+        if (-not $script:NativeUia) { return $null }
+        $hwnd = Find-WindowHwnd ([string]$a.title)
+        if ($hwnd -eq 0) { return $null }
+        $argv = @(
+            [int]$script:UiaBudgetMs, $hwnd, $action, [string]$a.name, [string]$a.type,
+            [string]$a.id, [int]$depth, [string]$a.value, [int]$limit
+        )
         return (Invoke-UiaNative 'RunActByHwnd' $argv | ConvertFrom-Json)
     } catch {
         # Нативный путь не сработал: это не повод ломать вызов, откатываемся.
@@ -558,7 +563,11 @@ function Invoke-UiaNative([string]$method, [object[]]$argv) {
     if (-not $mi) { throw "У нативного слоя UIA нет метода $method" }
     $r = $mi.Invoke($null, $argv)
     if ($script:UiaDiag) {
-        $script:UiaDiag = "$method($($argv -join ', ')) -> ok=$($r.Ok) статус=$($r.Status) длина=$($r.Data.Length) err='$($r.Error)' TID=$($r.ThreadId) $($r.ElapsedMs)мс"
+        # При таймауте или ошибке $r.Data равен $null, и обращение к .Length
+        # роняло бы всю диагностику с NullReferenceException ровно тогда,
+        # когда она нужнее всего.
+        $dataLen = if ($r.Data) { $r.Data.Length } else { 'n/a' }
+        $script:UiaDiag = "$method($($argv -join ', ')) -> ok=$($r.Ok) статус=$($r.Status) длина=$dataLen err='$($r.Error)' TID=$($r.ThreadId) $($r.ElapsedMs)мс"
         [Console]::Error.WriteLine("UIA-DIAG: $($script:UiaDiag)")
     }
     if ($r.Ok) { return $r.Data }
@@ -1915,14 +1924,15 @@ function Invoke-Tool {
                     if ($nat.status -eq 'disabled') {
                         throw "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, нажать нельзя. Нажатие отчиталось бы успехом, но ничего не изменит."
                     }
-                    if ($nat.status -eq 'notfound') {
-                        throw "Элемент '$($a.name)' не найден — нажимать нечего"
-                    }
                     if ($nat.status -eq 'ok') {
                         $result = [ordered]@{ ok = $true; via = $nat.via; element = $nat.element }
                         break
                     }
-                    # noPattern и error: спускаемся на пиксельный клик ниже
+                    # notfound сюда НЕ бросаем. Нативный путь смотрит в одно
+                    # окно, выбранное по заголовку, а старый искал во всех
+                    # окнах с таким заголовком. При нескольких пересекающихся
+                    # заголовках отказ здесь ломал бы сценарий, который раньше
+                    # работал. noPattern и error уходят дальше тем же путём.
                 }
 
                 $hits = Resolve-Target $a
@@ -1967,11 +1977,11 @@ function Invoke-Tool {
                     if ($nat.status -eq 'disabled') {
                         throw "Элемент '$($nat.element.name)' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
                     }
-                    if ($nat.status -eq 'notfound') { throw "Элемент '$($a.name)' не найден" }
                     if ($nat.status -eq 'ok') {
                         $result = [ordered]@{ ok = $true; via = $nat.via; value = [string]$a.value; element = $nat.element }
                         break
                     }
+                    # notfound уходит в фоллбэк по той же причине, что и в invoke.
                 }
                 $hits = Resolve-Target $a
                 if (@($hits).Count -eq 0) { throw "Элемент '$($a.name)' не найден" }
