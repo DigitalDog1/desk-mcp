@@ -149,45 +149,49 @@ happened to be open.
 
 | Window | Size | `find` | Whole tree | `compact` | Filtered tree | Repeat (`auto`) | Picture | OCR |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Parcel Tracker (WinForms) | 940x640 | 83 | 12386 | 9052 | 2595 | 38 | 803 | 4389 |
-| Paint | 1843x1005 | 83 | 8247 | 6136 | 1716 | 38 | 2470 | 5683 |
-| Edge (page) | 1265x1380 | 94 | 14105 | 10845 | 154 | 38 | 2328 | 5496 |
-| Wallpaper UI | 740x560 | 20 | 1710 | 1999 | 127 | none | 553 | 244 |
-| Windows Help | 2504x1226 | 97 | 16158 | 12448 | 163 | 38 | 4094 | 7939 |
-| MiniMax Code | 2576x1416 | 93 | 2515 | 1950 | 142 | 38 | 4864 | 8534 |
+| Parcel Tracker (WinForms) | 940x640 | 83 | 12834 | 10531 | 3131 | 38 | 803 | 4878 |
+| Paint | 1843x1005 | 83 | 8247 | 6842 | 1896 | 38 | 2470 | 6090 |
+| Edge (page) | 1265x1380 | 94 | 14881 | 12703 | 160 | 38 | 2328 | 5902 |
+| Wallpaper UI | 740x560 | 20 | 1710 | 2177 | 133 | none | 553 | 244 |
+| Windows Help | 2504x1226 | 97 | 16158 | 13836 | 169 | 38 | 4094 | 8341 |
+| MiniMax Code | 2576x1416 | 93 | 2515 | 2144 | 148 | 38 | 4864 | 8939 |
 
 Filtered tree is `maxDepth: 4, interactiveOnly: true, compact: true`. Repeat is the
 same read again through `mode: auto` carrying the token from the previous answer.
+Picture tokens come from the measured pixel size of the returned image, not from the
+window rectangle.
 
 Read honestly, this table is not a victory lap:
 
-- **An unfiltered tree costs 3 to 15 times more than a picture of the same window.**
-  The claim that structure is cheaper was true of the filtered case, and the filter
-  was doing all the work.
-- What the tokens buy is addresses. Parcel Tracker gives 87 named elements at 142
+- **On five of the six windows an unfiltered tree costs 3 to 16 times more than a
+  picture of the same window**, and on the sixth it is twice cheaper. The claim that
+  structure is cheaper was true of the filtered case, and the filter was doing all the
+  work.
+- What the tokens buy is addresses. Parcel Tracker gives 87 named elements at 147
   tokens each; the picture gives none, and every click on it is a guess about
   coordinates that go stale. On Edge and Windows Help, filtering brings the tree to
-  154 and 163 tokens, which is cheaper than the picture and fully addressable.
-- `compact` saves 13% to 31% on a big tree and **loses** on a small one: on
-  Wallpaper UI it turned 1710 tokens into 1999, because the `fields` legend is a
-  fixed cost.
-- A repeat read through `mode: auto` costs 38 tokens against 12386 for the first
+  160 and 169 tokens, which is cheaper than the picture and fully addressable.
+- `compact` saves 14% to 18% on a big tree and **loses** on a small one: on
+  Wallpaper UI it turned 1710 tokens into 2177, because the `fields` legend is a
+  fixed cost. Measure, do not assume: 22% and 27% were the numbers for the same code
+  on a different set of windows.
+- A repeat read through `mode: auto` costs 38 tokens against 12834 for the first
   one. That is the cheapest line in the table and the reason to send the token back.
 - OCR is the weakest reader of a window and the strongest one when the coordinates
-  are known: a 420x40 strip costs 296 tokens against 2595 for the filtered tree, and
+  are known: a 420x40 strip costs 296 tokens against 3131 for the filtered tree, and
   a picture of that same strip costs 23.
-- Walking the tree is slower than taking the picture: 140 ms against 28 ms on Parcel
-  Tracker, 111 against 37 on Edge. UIA is COM into another process.
+- Walking the tree is slower than taking the picture: 134 ms against 27 ms on Parcel
+  Tracker, 115 against 39 on Edge. UIA is COM into another process.
 
 ### Where this loses
 
 - **Coordinates are already known.** Reading a whole window to get one field costs 6
-  to 9 times more than OCR of that field.
-- **No filter, and the question is visual.** A picture is 3 to 15 times cheaper, and
+  to 11 times more than OCR of that field.
+- **No filter, and the question is visual.** A picture is 3 to 16 times cheaper, and
   it is the only one that answers "what colour is the button" or "is the layout
   broken". Those answers are not in the structure at any price.
 - **A stale token.** Every `mode: auto` answer returns a new token and the next call
-  must carry it. Reuse the old one and the whole tree comes back, 218 to 426 times
+  must carry it. Reuse the old one and the whole tree comes back, 67 to 426 times
   more tokens. That is deliberate: a diff against a baseline the caller no longer
   holds would be invented.
 - **A window that repaints itself.** Changes pile up, the delta outgrows the full
@@ -290,10 +294,11 @@ stall. Full walk of the demo app, start to finish, including worker start:
 - `computer_invoke`, `computer_set_value` and `computer_select_text` refuse on
   `enabled: false`, because `InvokePattern` on a disabled control returns happily in
   Windows and does nothing at all.
-- Every refusal carries a machine-readable `code` next to the human sentence
+- Every refusal that comes from the server carries a machine-readable `code` next to the
   (`ElementNotFound`, `ElementDisabled`, `OptionNotFound`, `PatternUnavailable`,
   `NotSelected`, `WindowNotFound`, `NeedsConfirm`, `BlockedByList`, `InvalidArgument`,
-  `NotSupported`, `WorkerRestarted`, `Timeout`, `CaptureFailed`, `InputBlocked`), so
+  `NotSupported`, `WorkerRestarted`, `Timeout`, `UIABlocked`, `CaptureFailed`,
+  `InputBlocked`), so
   an agent can tell "there is no such element" from "the element is there but
   disabled" without parsing Russian.
 - `computer_selftest` checks the whole channel at once.
@@ -492,7 +497,7 @@ desktop, which is the closest thing here to being out of the way.
 npm test
 ```
 
-Expected tail: `ИТОГ: 68 ок, 0 провалов, N пропущено`. The harness prints in Russian:
+Expected tail: `ИТОГ: 72 ок, 0 провалов, N пропущено`. The harness prints in Russian:
 `ок` is passed, `провалов` is failed, `пропущено` is skipped. A skipped check means
 some window on the machine refused to answer UI Automation (Steam, 1C, old WPF hold
 the COM call open) and the breaker caught it. That is a property of somebody else's

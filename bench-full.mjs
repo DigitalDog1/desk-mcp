@@ -85,6 +85,30 @@ async function timed(name, args = {}, repeat = REPEAT) {
   return { ...last, median: median(runs), min: Math.min(...runs), max: Math.max(...runs), runs };
 }
 
+// Размер картинки берётся из самого изображения, а не из границ окна: снимок
+// мог быть уменьшен, обрезан или пришёл в jpeg, и все три меняют цену. Формулы
+// токенов считают именно пиксели, которые уйдут в запрос.
+function imageSize(img) {
+  if (!img?.data) return null;
+  const buf = Buffer.from(img.data, "base64");
+  if (img.mimeType === "image/png" && buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) {
+    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+  }
+  // JPEG: идём по маркерам до SOFn, где лежат ширина и высота.
+  let off = 2;
+  while (off + 9 < buf.length) {
+    if (buf[off] !== 0xff) { off++; continue; }
+    const marker = buf[off + 1];
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+      return { w: buf.readUInt16BE(off + 7), h: buf.readUInt16BE(off + 5) };
+    }
+    const len = buf.readUInt16BE(off + 2);
+    if (len < 2) break;
+    off += 2 + len;
+  }
+  return null;
+}
+
 const num = (v) => (v == null || Number.isNaN(v) ? "-" : String(v));
 const table = (head, rows) => {
   const all = [head, ...rows];
@@ -159,7 +183,10 @@ for (const w of targets) {
   const ocr = await timed("computer_ocr", { region, lang: "ru-RU" });
   const find = await timed("computer_find", { title: w.title, type: "Button", limit: 1 });
 
-  const shotTokens = tokImageAnthropic(rect.w, rect.h);
+  const shotSize = imageSize(shot.img) ?? { w: rect.w, h: rect.h };
+  const shotHalfSize = imageSize(shotHalf.img) ?? { w: Math.round(rect.w / 2), h: Math.round(rect.h / 2) };
+  const shotTokens = tokImageAnthropic(shotSize.w, shotSize.h);
+  const shotHalfTokens = tokImageAnthropic(shotHalfSize.w, shotHalfSize.h);
   // Адресуемость: сколько элементов вообще можно назвать и по ним кликнуть.
   // Снимок не адресует ничего, поэтому сравнение токенов без этого числа
   // сравнивает разные вещи: карту с картинкой.
@@ -181,8 +208,8 @@ for (const w of targets) {
     lean: { ms: lean.median, ok: lean.ok, tokens: tokText(lean.text) },
     delta: { ms: delta.median, ok: delta.ok, tokens: tokText(delta.text) },
     stale: { ms: stale.ms, kind: staleKind, tokens: tokText(stale.text) },
-    shot: { ms: shot.median, ok: shot.ok, tokens: shotTokens, got: !!shot.img },
-    shotHalf: { ms: shotHalf.median, ok: shotHalf.ok, tokens: Math.ceil(shotTokens / 4) },
+    shot: { ms: shot.median, ok: shot.ok, tokens: shotTokens, got: !!shot.img, size: shotSize },
+    shotHalf: { ms: shotHalf.median, ok: shotHalf.ok, tokens: shotHalfTokens, size: shotHalfSize },
     ocr: { ms: ocr.median, ok: ocr.ok, tokens: tokText(ocr.text) },
     find: { ms: find.median, ok: find.ok, tokens: tokText(find.text) },
   });
@@ -208,21 +235,23 @@ table(
   ["окно", "снимок", "структура (compact)", "выигрыш структуры"],
   perWindow.map((r) => [
     r.title.slice(0, 26),
-    String(tokImageOpenAI(r.rect.w, r.rect.h)),
+    String(tokImageOpenAI(r.shot.size.w, r.shot.size.h)),
     r.compact.ok ? String(r.compact.tokens) : "прочерк",
     r.compact.ok && r.compact.tokens > 0
-      ? `${(tokImageOpenAI(r.rect.w, r.rect.h) / r.compact.tokens).toFixed(1)}x`
+      ? `${(tokImageOpenAI(r.shot.size.w, r.shot.size.h) / r.compact.tokens).toFixed(1)}x`
       : "прочерк",
   ]),
 );
 
 // Токены сами по себе сравнивают разные вещи: снимок не адресует ни одного
 // элемента, дерево адресует все. Без этой строки выигрыш структуры выглядит
-// как проигрыш, а отсеянное дерево — как победа.
+// как проигрыш, а отсеянное дерево как победа.
 console.log("\n1b. За что платим: токены на один адресуемый элемент");
 console.log("-".repeat(78));
+console.log("Снимок не адресует ничего: у него ноль элементов, и это не измерение,");
+console.log("а свойство ответа. Поэтому в колонке токенов стоит ноль.\n");
 table(
-  ["окно", "дерево целиком", "с фильтром", "элементов", "т/элемент", "снимок", "элементов у снимка"],
+  ["окно", "дерево целиком", "с фильтром", "элементов", "т/элемент", "снимок", "адресуемых"],
   perWindow.map((r) => [
     r.title.slice(0, 26),
     r.full.ok ? `${r.full.tokens} т` : "прочерк",
@@ -311,7 +340,8 @@ if (first) {
   await add("read_screen compact", "computer_read_screen", { title: first.title, maxDepth: 5, maxElements: 150, compact: true });
   await add("снимок окна 0.4", "computer_screenshot", { window: first.title, scale: 0.4 });
   await add("OCR полосы", "computer_ocr", { region: `${first.rect.x},${first.rect.y},400,60`, lang: "ru-RU" });
-  await add("wait_element state", "computer_wait_element", {
+  // Это замер пути таймаута: элемента заведомо нет, ждать нечего.
+  await add("wait_element (таймаут)", "computer_wait_element", {
     title: first.title, name: "ZZZнеттакого", mode: "appear", timeoutMs: 400,
   });
   await add("select отказ", "computer_select", { title: first.title, name: "ZZZнеттакой", value: "x" });

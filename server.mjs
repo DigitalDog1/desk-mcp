@@ -263,7 +263,7 @@ function uiKey(tool, a) {
 function deadline(promise, ms, what) {
   let timer;
   const guard = new Promise((_, rej) => {
-    timer = setTimeout(() => rej(new Error(`${what} не успел за ${ms / 1000} с (включая ожидание перезапуска воркера)`)), ms);
+    timer = setTimeout(() => rej(errWith(`${what} не успел за ${ms / 1000} с (включая ожидание перезапуска воркера)`, "Timeout")), ms);
   });
   return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
 }
@@ -275,10 +275,13 @@ async function callUi(tool, args, timeoutMs = UI_TIMEOUT_MS) {
   for (const [k, v] of uiSuspect) if (v <= now) uiSuspect.delete(k);
   if (until && until > now) {
     const left = Math.ceil((until - now) / 1000);
-    throw new Error(
+    // Свой код у этой блокировки: «зависло сейчас» и «зависло минуту назад,
+    // окно ещё остывает» это разные ситуации, и агент обязан их различать.
+    throw errWith(
       `UI Automation к '${key}' отключена на ${left} с после зависания: окно не отвечает. ` +
         `Повторный вызов её не вылечит — бери другой слой: computer_screenshot + computer_ocr, ` +
         `MSAA-слой computer_read_screen без окна, или работай с другим окном.`,
+      "UIABlocked",
     );
   }
   try {
@@ -288,10 +291,11 @@ async function callUi(tool, args, timeoutMs = UI_TIMEOUT_MS) {
   } catch (e) {
     if (/не ответил|не успел/.test(e.message || "")) {
       uiSuspect.set(key, Date.now() + UI_COOLDOWN_MS);
-      throw new Error(
+      throw errWith(
         `UI Automation зависла на '${key}': нет ответа ${timeoutMs / 1000} с, воркер перезапущен. ` +
           `Окно не отвечает на UIA — следующие вызовы к нему заблокированы на ${UI_COOLDOWN_MS / 1000} с. ` +
           `Дальше: computer_screenshot + computer_ocr или другое окно.`,
+        "Timeout",
       );
     }
     throw e;
@@ -970,7 +974,7 @@ reg(
       maxDepth: z.number().int().min(1).max(20).optional().default(8),
     },
   },
-  R(async (a) => ok(await worker.call("wait_element", a))),
+  R(async (a) => ok(await callUi("wait_element", a, Math.max(UI_TIMEOUT_MS, (a.timeoutMs ?? 5000) + 2_000)))),
 );
 
 reg(

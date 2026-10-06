@@ -1072,28 +1072,112 @@ function Get-ElementInfosCached {
 $script:TreeBaseline = @{}
 $script:TokenSeq = 0
 
+# База дельт ограничена по числу записей. Ключ включает заголовок окна, а у
+# браузера заголовок меняется на каждую вкладку, поэтому агент, который читает
+# страницы, создавал новый ключ на каждый заголовок и никогда не возвращался к
+# старому. Без ограничения это тихая утечка памяти на всю сессию: в записи лежит
+# подпись каждого узла дерева. Храним последние базы и забываем самые старые.
+$script:BaselineOrder = New-Object System.Collections.ArrayList
+$script:BaselineLimit = 12
+
+function Set-TreeBaseline([string]$bkey, $token, $sig) {
+    if ($script:TreeBaseline.ContainsKey($bkey)) {
+        [void]$script:BaselineOrder.Remove($bkey)
+    }
+    [void]$script:BaselineOrder.Add($bkey)
+    $script:TreeBaseline[$bkey] = @{ token = $token; sig = $sig }
+    while ($script:BaselineOrder.Count -gt $script:BaselineLimit) {
+        $oldest = [string]$script:BaselineOrder[0]
+        [void]$script:BaselineOrder.RemoveAt(0)
+        if ($script:TreeBaseline.ContainsKey($oldest)) { $script:TreeBaseline.Remove($oldest) }
+    }
+}
+
 function New-SnapshotToken {
     $script:TokenSeq++
     return "t$($script:TokenSeq)"
 }
 
+# Компактный узел приходит позиционным массивом:
+# [имя, роль, automationId, [x,y,w,h], флаги, паттерны, value, text, дети].
+# Обращение $n.id к такому массиву в PowerShell даёт не поле, а символ по
+# индексу, поэтому все узлы получали один ключ и подпись, а дельта по
+# compact-деревьям молча и навсегда отвечала «ничего не изменилось», даже когда
+# окно менялось целиком. Ключ и подпись строятся по форме узла, а наружу в
+# changes отдаётся исходный узел: легенда полей у вызывающего остаётся той же.
+function Get-NodeRectKey($r) {
+    if ($r -is [System.Array]) { return "$($r[0]),$($r[1]),$($r[2]),$($r[3])" }
+    if ($r) { return "$($r.x),$($r.y),$($r.w),$($r.h)" }
+    return ''
+}
+
+# PowerShell при обращении к свойству оборачивает вложенные массивы в PSObject,
+# и такой узел приходит не массивом, а обёрткой {value: [...], Count: N}:
+# обращение $n[2] к ней отдаёт не automationId, а список свойств обёртки.
+# Разворачиваем до.baseObject, иначе ключ мусорит, а дельта видит одно и то же.
+function Expand-Node($n) {
+    if ($null -eq $n) { return $null }
+    if ($n -is [System.Array]) { return $n }
+    if ($n -is [System.Management.Automation.PSObject]) {
+        $base = $n
+        try { $base = $n.BaseObject } catch { $base = $n }
+        if ($base -is [System.Array]) { return $base }
+    }
+    return $n
+}
+
 function Get-NodeKey($n) {
+    $n = Expand-Node $n
+    if ($n -is [System.Array]) {
+        $id = $n[2]
+        if ($id -is [System.Array]) { $id = $id[0] }
+        if ($id) { return "id:$id" }
+        return "n:$($n[0])|$($n[1])|$(Get-NodeRectKey $n[3])"
+    }
     if ($n.id) { return "id:$($n.id)" }
-    $r = $n.rect
-    if ($r) { return "n:$($n.name)|$($n.type)|$($r.x),$($r.y),$($r.w),$($r.h)" }
+    $rectKey = Get-NodeRectKey $n.rect
+    if ($rectKey) { return "n:$($n.name)|$($n.type)|$rectKey" }
     return "n:$($n.name)|$($n.type)"
+}
+
+function Get-NodeChildren($n) {
+    $n = Expand-Node $n
+    if ($n -is [System.Array]) { return @($n[8]) }
+    return @($n.children)
 }
 
 # Подпись узла без потомков. Если включить children, то изменение одного
 # листа помечало бы "update" всех его предков, и дельта раздувалась бы
 # ровно настолько, чтобы потерять смысл.
 function Get-NodeSignature($n) {
+    $n = Expand-Node $n
+    if ($n -is [System.Array]) {
+        # Флаги компактного узла: 1 включён, 2 за экраном, 4 выделен, 8 включённый
+        # переключатель. Собираем те же поля, что и у обычного узла.
+        $f = 0
+        try { $f = [int]$n[4] } catch { $f = 0 }
+        # Текст контейнера в UIA это склейка текста всех потомков, поэтому он
+        # меняется от любого изменения внутри. В подпись он не входит: иначе
+        # корень окна всегда помечался бы как изменённый и тянул за собой всё
+        # поддерево, то есть дельта вырождалась бы в полный ответ. У листа текст
+        # собственный, там он и нужен.
+        $hasKids = @($n[8]).Count -gt 0
+        $own = [ordered]@{
+            name = $n[0]; type = $n[1]; id = $n[2]; rect = (Get-NodeRectKey $n[3])
+            enabled = (($f -band 1) -ne 0); offscreen = (($f -band 2) -ne 0)
+            selected = (($f -band 4) -ne 0); toggle = (($f -band 8) -ne 0)
+            patterns = $n[5]; value = $n[6]; text = $(if ($hasKids) { $null } else { $n[7] })
+        }
+        return ($own | ConvertTo-Json -Compress -Depth 4)
+    }
     $own = [ordered]@{
         name = $n.name; type = $n.type; id = $n.id; class = $n.class
         rect = $n.rect; enabled = $n.enabled; offscreen = $n.offscreen
         patterns = $n.patterns
     }
     foreach ($k in @('value', 'text', 'toggle', 'selected')) {
+        # text у контейнера, как и выше, агрегатный и в подпись не годится.
+        if ($k -eq 'text' -and @($n.children).Count -gt 0) { continue }
         if ($n.PSObject.Properties.Name -contains $k) { $own[$k] = $n.$k }
     }
     return ($own | ConvertTo-Json -Compress -Depth 4)
@@ -1107,7 +1191,7 @@ function Get-NodeIndex($windows) {
         $n = $stack.Pop()
         $k = Get-NodeKey $n
         if (-not $idx.ContainsKey($k)) { $idx[$k] = $n }
-        foreach ($c in @($n.children)) { if ($c) { $stack.Push($c) } }
+        foreach ($c in (Get-NodeChildren $n)) { if ($c) { $stack.Push($c) } }
     }
     return , $idx
 }
@@ -1127,7 +1211,7 @@ function Compare-Tree([string]$mode, [string]$since, [string]$bkey, $windows, [i
 
     if ($mode -ne 'auto') {
         if ($mode -eq 'reset') {
-            $script:TreeBaseline[$bkey] = @{ token = $token; sig = $sig }
+            Set-TreeBaseline $bkey $token $sig
             $full['baseline'] = 'reset'
         }
         return $full
@@ -1135,7 +1219,7 @@ function Compare-Tree([string]$mode, [string]$since, [string]$bkey, $windows, [i
 
     $base = $script:TreeBaseline[$bkey]
     if (-not $base -or $since -ne $base.token) {
-        $script:TreeBaseline[$bkey] = @{ token = $token; sig = $sig }
+        Set-TreeBaseline $bkey $token $sig
         $full['note'] = 'первый автоматический ответ или токен устарел, отдан полный вид'
         return $full
     }
@@ -1152,7 +1236,7 @@ function Compare-Tree([string]$mode, [string]$since, [string]$bkey, $windows, [i
         if (-not $idx.ContainsKey($k)) { $changes += ,([ordered]@{ op = 'remove'; key = $k }) }
     }
 
-    $script:TreeBaseline[$bkey] = @{ token = $token; sig = $sig }
+    Set-TreeBaseline $bkey $token $sig
 
     if ($changes.Count -eq 0) {
         return [ordered]@{
@@ -1162,8 +1246,20 @@ function Compare-Tree([string]$mode, [string]$since, [string]$bkey, $windows, [i
         }
     }
     $diffSize = ($changes | ConvertTo-Json -Compress -Depth 5).Length
-    if ($diffSize -ge $size) {
+    # Сравнивать надо с настоящим размером полного ответа, а не с суммой длин
+    # подписей: подпись это один узел, полный ответ это дерево с ключами,
+    # вложенностью и заголовком. Сумма подписей меньше ответа в разы, поэтому
+    # сравнение с ней вырождало любую дельту в полный вид.
+    $fullSize = 0
+    try {
+        $fullSize = ($windows | ConvertTo-Json -Compress -Depth 9).Length
+    } catch {
+        $fullSize = [int]($size * 3)
+    }
+    if ($diffSize -ge $fullSize) {
         $full['note'] = 'дельта вышла бы не меньше полного ответа, отдан полный вид'
+        $full['deltaChars'] = $diffSize
+        $full['fullChars'] = $fullSize
         return $full
     }
     return [ordered]@{
@@ -1752,7 +1848,10 @@ function Invoke-Tool {
                 if ($wmode -notin @('appear', 'disappear', 'state')) {
                     Fail 'InvalidArgument' "Неизвестный режим ожидания '$wmode' (appear|disappear|state)"
                 }
-                $timeoutMs = if ($a.timeoutMs) { [int]$a.timeoutMs } else { 5000 }
+                # Ноль это осмысленное значение: «проверь один раз и не жди». Проверка через
+                # truthiness молча превращала ноль в дефолт 5000, то есть агент,
+                # попросивший не ждать, получал пятисекундное ожидание.
+                $timeoutMs = if ($null -ne $a.timeoutMs) { [int]$a.timeoutMs } else { 5000 }
                 if ($timeoutMs -lt 0 -or $timeoutMs -gt 120000) {
                     Fail 'InvalidArgument' "Бюджет ожидания вне диапазона 0..120000 мс: $timeoutMs"
                 }
@@ -2303,6 +2402,11 @@ function Invoke-Tool {
                             Fail 'PatternUnavailable' $nat.error
                         }
                         Fail 'PatternUnavailable' "Чтение таблицы не удалось: $($nat.status)"
+                    } else {
+                        # Раньше сюда попадали и «окно не нашлось», и «нативный слой
+                        # не загрузился», и агент читал про несуществующую поломку
+                        # при пустом NativeUiaError. Окно и слой это разные вещи.
+                        Fail 'WindowNotFound' "Окно '$([string]$a.title)' не найдено: read_table ищет сетку в конкретном окне, укажи title"
                     }
                 }
                 Fail 'NotSupported' "Чтение таблицы требует нативного слоя UIA, а он не загрузился: $($script:NativeUiaError)"
@@ -2343,6 +2447,12 @@ function Invoke-Tool {
                 $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
                 $want = if ($a.value) { [string]$a.value } else { '' }
                 if ($want -eq '') { Fail 'InvalidArgument' "Не передано значение для выбора (value)" }
+                if (-not ([string]$a.title)) {
+                    # Без заголовка окна искать негде, и сообщение про
+                    # несуществующий сломанный нативный слой тут обманывало:
+                    # слой как раз загружен, просто не сказано, где искать.
+                    Fail 'InvalidArgument' "Не указан title: computer_select ищет элемент со списком в конкретном окне"
+                }
                 $nat = Invoke-UiAct 'select' $a $depth 1
                 if ($nat) {
                     if ($nat.status -eq 'disabled') {

@@ -775,31 +775,40 @@ public static class UiaNative
         b.Append(flags).Append(',');
         b.Append(patJson.Length > 0 ? patJson : "[]");
 
+        // value и text пишутся всегда, даже когда паттерна нет, иначе позиции
+        // в массиве зависят от того, есть ли паттерн: у одного окна слот 6 это
+        // значение, у другого текст, а у третьего дети. Легенда полей обещает
+        // фиксированный порядок, и разбор по позициям обязан быть честным.
+        b.Append(',');
         if (Has(pats, "ValuePattern"))
         {
             try
             {
                 ValuePattern vp = el.GetCurrentPattern(ValuePattern.Pattern) as ValuePattern;
-                if (vp != null) b.Append(',').Append(J(Trunc(vp.Current.Value, 300)));
+                b.Append(vp != null ? J(Trunc(vp.Current.Value, 300)) : "null");
             }
-            catch (Exception) { }
+            catch (Exception) { b.Append("null"); }
         }
+        else { b.Append("null"); }
 
+        b.Append(',');
         if (Has(pats, "TextPattern"))
         {
             try
             {
                 TextPattern tp = el.GetCurrentPattern(TextPattern.Pattern) as TextPattern;
+                string txt = null;
                 if (tp != null)
                 {
                     TextPatternRange doc = tp.DocumentRange;
                     string full = doc.GetText(-1);
-                    if (full == null) full = "";
-                    b.Append(',').Append(J(Trunc(full, 300)));
+                    txt = Trunc(full, 300);
                 }
+                b.Append(txt != null ? J(txt) : "null");
             }
-            catch (Exception) { }
+            catch (Exception) { b.Append("null"); }
         }
+        else { b.Append("null"); }
 
         if (kids.Count > 0)
         {

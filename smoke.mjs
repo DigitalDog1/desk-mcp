@@ -151,30 +151,54 @@ if (tKey) {
     fail++;
     console.log(`  СБОЙ дельта: mode=auto не вернул токен: ${txt1.slice(0, 120)}`);
   }
-  // Второе чтение того же окна без изменений обязано стоить в разы дешевле.
+  // Свежий токен обязан дать дельту, а не полный вид. Принимать "full" здесь
+  // нельзя: полный вид и означает, что дельта не работает.
   const txt2 = (await call("computer_read_screen", { ...autoArgs, since: tok })).content?.[0]?.text ?? "";
   let j2 = null;
   try { j2 = JSON.parse(txt2); } catch { /* не JSON */ }
-  if (j2?.kind === "diff" && Array.isArray(j2.changes) && j2.changes.length === 0) {
+  if (j2?.kind === "diff" && Array.isArray(j2.changes)) {
     pass++;
-    const times = Math.round(txt1.length / Math.max(1, txt2.length));
-    console.log(`  ОК   дельта: повтор без изменений — ${txt2.length} симв. вместо ${txt1.length} (в ${times} раз меньше), changes=[]`);
-  } else if (j2?.kind === "full" && /устарел|не меньше полного/.test(txt2)) {
-    pass++;
-    console.log(`  ОК   дельта: полный вид с внятным объяснением вместо выдуманной дельты`);
+    const times = txt1.length / Math.max(1, txt2.length);
+    console.log(`  ОК   дельта: повтор по свежему токену — ${j2.changes.length} изменений, ${txt2.length} симв. вместо ${txt1.length} (в ${times.toFixed(0)} раз меньше)`);
   } else {
     fail++;
-    console.log(`  СБОЙ дельта: kind=${j2?.kind}, changes=${JSON.stringify(j2?.changes)?.slice(0, 120)}`);
+    console.log(`  СБОЙ дельта: свежий токен дал kind=${j2?.kind}, а не diff: ${txt2.slice(0, 120)}`);
   }
-  // Чужой токен обязан дать полный вид: сравнивать с чужой базой нельзя.
+  // Чужой токен обязан дать полный вид и сказать про устаревший токен: сравнивать
+  // с чужой базой нельзя.
   const txt3 = (await call("computer_read_screen", { ...autoArgs, since: "мусорный-токен" })).content?.[0]?.text ?? "";
-  if (/устарел|не меньше полного/.test(txt3) || /"kind":\s*"full"/.test(txt3)) {
+  if (/"kind":\s*"full"/.test(txt3) && /устарел/.test(txt3)) {
     pass++;
-    console.log("  ОК   дельта: чужой токен вернул полный вид, а не сравнение с чужой базой");
+    console.log("  ОК   дельта: чужой токен вернул полный вид с объяснением, а не выдуманное сравнение");
   } else {
     fail++;
     console.log(`  СБОЙ дельта: чужой токен дал ${txt3.slice(0, 120)}`);
   }
+  // Compact-деревья приходят позиционными массивами, и разбор по полям здесь
+  // ломался так, что дельта всегда говорила «ничего не изменилось». Этот сценарий
+  // защищает именно эту комбинацию, она и в README рекомендована.
+  const cArgs = { title: tKey, maxDepth: 5, maxElements: 120, mode: "auto", compact: true };
+  const c1 = (await call("computer_read_screen", cArgs)).content?.[0]?.text ?? "";
+  let ctok = null;
+  try { ctok = JSON.parse(c1).token ?? null; } catch { /* не JSON */ }
+  if (!ctok) {
+    fail++;
+    console.log(`  СБОЙ дельта compact: база не отдала токен: ${c1.slice(0, 120)}`);
+  } else {
+    const c2 = (await call("computer_read_screen", { ...cArgs, since: ctok })).content?.[0]?.text ?? "";
+    let cj = null;
+    try { cj = JSON.parse(c2); } catch { /* не JSON */ }
+    if (cj?.kind === "diff" && Array.isArray(cj.changes)) {
+      pass++;
+      console.log(`  ОК   дельта compact: повтор по свежему токену — ${cj.changes.length} изменений, ${c2.length} симв. вместо ${c1.length}`);
+    } else {
+      fail++;
+      console.log(`  СБОЙ дельта compact: kind=${cj?.kind} вместо diff: ${c2.slice(0, 120)}`);
+    }
+  }
+} else {
+  skipped += 3;
+  console.log("  ПРОПУЩЕНО дельты — нет подходящего окна");
 }
 
 console.log("== ожидание элемента (вместо сна и вслепую) ==");
@@ -195,13 +219,26 @@ if (btn && (btn.id || btn.name)) {
 }
 
 console.log("== таблица и выбор: отказ там, где данных нет ==");
-// Таблицы в окне может не быть, но несуществующий элемент — это всегда отказ
+// Таблицы в окне может не быть, но несуществующий элемент это всегда отказ
 // с кодом, и код обязан называть причину, а не молчать.
 await checkTarget("computer_read_table", { title: tKey, name: "ZZZнеттакойтаблицы" },
   (r, t) => /ElementNotFound/.test(t));
-// Кнопка не умеет выбор: это не «элемент не найден», а «паттерна нет».
-await checkTarget("computer_select", { title: tKey, name: btn?.name ?? "ZZZнеттакой", type: "Button", value: "любое" },
-  (r, t) => /PatternUnavailable|NotSupported|ElementNotFound/.test(t));
+// Без title искать негде, и отказ обязан говорить про окно, а не про
+// несуществующий сломанный нативный слой (такой текст тут и выдавался).
+await check("computer_read_table", { id: "ZZZ" }, (r, t) => /WindowNotFound/.test(t));
+await check("computer_select", { name: "ZZZнеттакой", value: "x" }, (r, t) => /InvalidArgument/.test(t));
+// Нулевой бюджет это «проверь один раз и не жди», а не дефолт 5000.
+await check("computer_wait_element", { title: tKey, name: "ZZZнеттакого", mode: "appear", timeoutMs: 0 },
+  (r, t) => /"probes":\s*1/.test(t) && /"timeoutMs":\s*0/.test(t));
+// Кнопка не умеет выбор: это «паттерна нет», а не «нет такого варианта».
+// Проверять имеет смысл на кнопке, найденной ранее, а не на выдуманном имени.
+if (btn && btn.name) {
+  await checkTarget("computer_select", { title: tKey, name: btn.name, type: "Button", value: "любое" },
+    (r, t) => /PatternUnavailable/.test(t));
+} else {
+  skipped++;
+  console.log("  ПРОПУЩЕНО computer_select на кнопке — в целевом окне не нашлось кнопки");
+}
 
 // Положительные сценарии таблицы и выбора требуют окна со сеткой и списком.
 // В штатном прогоне это демонстрационное окно; если его нет — честный пропуск,
