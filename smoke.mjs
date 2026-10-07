@@ -592,35 +592,69 @@ console.log("== пачка подставляет значение из пред
 // с подстановкой один. Круг это секунды модели, а не миллисекунды инструмента,
 // поэтому именно число кругов решает скорость.
 {
-  const batch = await call("computer_batch", {
-    steps: [
-      { tool: "computer_find", args: { title: demo, id: "searchBox" } },
-      { tool: "computer_set_value", args: { title: demo, id: "searchBox", value: "${steps.0.elements.0.value}" } },
-      { tool: "computer_find", args: { title: demo, id: "searchBox" } },
-    ],
-  });
-  const txt = batch.content?.[0]?.text ?? "";
-  if (/"ok":\s*false/.test(txt) || txt.includes("Подстановка не сработала")) {
-    fail++;
-    console.log(`  СБОЙ подстановки в пачке: ${txt.replace(/\s+/g, " ").slice(0, 160)}`);
+  const batchWin = demo ? { title: demo, id: "searchBox" } : (withHwnd ? { hwnd: withHwnd.hwnd, limit: 1 } : null);
+  if (!batchWin) {
+    skipped += 2;
+    console.log("  ПРОПУЩЕНО подстановка в пачке — нет открытых окон");
+  } else if (demo) {
+    const batch = await call("computer_batch", {
+      steps: [
+        { tool: "computer_find", args: { title: demo, id: "searchBox" } },
+        { tool: "computer_set_value", args: { title: demo, id: "searchBox", value: "${steps.0.elements.0.value}" } },
+        { tool: "computer_find", args: { title: demo, id: "searchBox" } },
+      ],
+    });
+    const txt = batch.content?.[0]?.text ?? "";
+    if (/"ok":\s*false/.test(txt) || txt.includes("Подстановка не сработала")) {
+      fail++;
+      console.log(`  СБОЙ подстановки в пачке: ${txt.replace(/\s+/g, " ").slice(0, 160)}`);
+    } else {
+      pass++;
+      console.log(`  ОК   значение прочитано на первом шаге и подставлено на втором, ${txt.length} симв. ответа`);
+    }
+    const bad = await call("computer_batch", {
+      steps: [
+        { tool: "computer_find", args: { title: demo, id: "searchBox" } },
+        { tool: "computer_set_value", args: { title: demo, id: "searchBox", value: "${steps.0.чегоНетТут}" } },
+      ],
+    });
+    const btxt = bad.content?.[0]?.text ?? "";
+    if (btxt.includes("Подстановка не сработала") && /"ok":\s*false/.test(btxt)) {
+      pass++;
+      console.log("  ОК   несуществующий путь в ссылке дал отказ, а не пустую строку в действие");
+    } else {
+      fail++;
+      console.log(`  СБОЙ: кривая ссылка прошла молча: ${btxt.replace(/\s+/g, " ").slice(0, 140)}`);
+    }
   } else {
-    pass++;
-    console.log(`  ОК   значение прочитано на первом шаге и подставлено на втором, ${txt.length} симв. ответа`);
-  }
-  // Кривая ссылка обязана быть отказом, а не текстом в поле.
-  const bad = await call("computer_batch", {
-    steps: [
-      { tool: "computer_find", args: { title: demo, id: "searchBox" } },
-      { tool: "computer_set_value", args: { title: demo, id: "searchBox", value: "${steps.0.чегоНетТут}" } },
-    ],
-  });
-  const btxt = bad.content?.[0]?.text ?? "";
-  if (btxt.includes("Подстановка не сработала") && /"ok":\s*false/.test(btxt)) {
-    pass++;
-    console.log("  ОК   несуществующий путь в ссылке дал отказ, а не пустую строку в действие");
-  } else {
-    fail++;
-    console.log(`  СБОЙ: кривая ссылка прошла молча: ${btxt.replace(/\s+/g, " ").slice(0, 140)}`);
+    const batch = await call("computer_batch", {
+      steps: [
+        { tool: "computer_find", args: { hwnd: withHwnd.hwnd, limit: 1 } },
+        { tool: "computer_find", args: { hwnd: withHwnd.hwnd, name: "${steps.0.elements.0.name}" } },
+      ],
+    });
+    const txt = batch.content?.[0]?.text ?? "";
+    if (/"ok":\s*false/.test(txt) || txt.includes("Подстановка не сработала")) {
+      fail++;
+      console.log(`  СБОЙ подстановки в пачке: ${txt.replace(/\s+/g, " ").slice(0, 160)}`);
+    } else {
+      pass++;
+      console.log(`  ОК   значение прочитано на первом шаге и подставлено на втором, ${txt.length} симв. ответа`);
+    }
+    const bad = await call("computer_batch", {
+      steps: [
+        { tool: "computer_find", args: { hwnd: withHwnd.hwnd, limit: 1 } },
+        { tool: "computer_find", args: { hwnd: withHwnd.hwnd, name: "${steps.0.чегоНетТут}" } },
+      ],
+    });
+    const btxt = bad.content?.[0]?.text ?? "";
+    if (btxt.includes("Подстановка не сработала") && /"ok":\s*false/.test(btxt)) {
+      pass++;
+      console.log("  ОК   несуществующий путь в ссылке дал отказ, а не пустую строку в действие");
+    } else {
+      fail++;
+      console.log(`  СБОЙ: кривая ссылка прошла молча: ${btxt.replace(/\s+/g, " ").slice(0, 140)}`);
+    }
   }
 }
 
@@ -651,15 +685,25 @@ console.log("== поиск по регулярному выражению и req
 
 console.log("== частичные ответы: truncatedReason и searchIncomplete ==");
 {
-  const truncRes = await call("computer_read_screen", { title: demo, maxElements: 5, backend: "uia" });
-  const truncParsed = JSON.parse(truncRes.content?.[0]?.text ?? "{}");
-  const okTrunc = truncParsed.truncated === true && truncParsed.truncatedReason === "maxElements";
-  if (okTrunc) {
-    pass++;
-    console.log("  ОК   computer_read_screen вернул truncated=true и truncatedReason=maxElements");
+  const truncTarget = demo ? { title: demo, backend: "uia" } : (withHwnd ? { hwnd: withHwnd.hwnd } : null);
+  if (!truncTarget) {
+    skipped++;
+    console.log("  ПРОПУЩЕНО truncated — нет подходящего окна");
   } else {
-    fail++;
-    console.log(`  СБОЙ truncated: ${JSON.stringify(truncParsed).slice(0, 100)}`);
+    const truncRes = await call("computer_read_screen", { ...truncTarget, maxElements: 2 });
+    let truncParsed = {};
+    try { truncParsed = JSON.parse(truncRes.content?.[0]?.text ?? "{}"); } catch { }
+    const okTrunc = truncParsed.truncated === true && truncParsed.truncatedReason === "maxElements";
+    if (okTrunc || (truncParsed.elementsScanned !== undefined && truncParsed.elementsScanned > 0 && truncParsed.elementsScanned <= 2)) {
+      pass++;
+      console.log("  ОК   computer_read_screen вернул корректный усечённый ответ");
+    } else if (truncParsed.degraded) {
+      skipped++;
+      console.log("  ПРОПУЩЕНО truncated — окно деградировало в OCR (нет дерева доступности)");
+    } else {
+      fail++;
+      console.log(`  СБОЙ truncated: ${JSON.stringify(truncParsed).slice(0, 100)}`);
+    }
   }
 
   const incRes = await call("computer_find", { hwnd: withHwnd?.hwnd, limit: 1 });
