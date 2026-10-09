@@ -171,6 +171,103 @@ public class DeskMcp {
         return bmp;
     }
 
+    public struct RectI32 {
+        public int X;
+        public int Y;
+        public int Width;
+        public int Height;
+        public RectI32(int x, int y, int w, int h) { X = x; Y = y; Width = w; Height = h; }
+    }
+
+    public static System.Collections.Generic.List<RectI32> GetOcrTiles(int width, int height, int edge, int overlap) {
+        var tiles = new System.Collections.Generic.List<RectI32>();
+        if (width <= 0 || height <= 0 || edge <= 0) return tiles;
+        if (width <= edge && height <= edge) {
+            tiles.Add(new RectI32(0, 0, width, height));
+            return tiles;
+        }
+        for (int y = 0; y < height; ) {
+            int h = Math.Min(edge, height - y);
+            for (int x = 0; x < width; ) {
+                int w = Math.Min(edge, width - x);
+                tiles.Add(new RectI32(x, y, w, h));
+                if (x + w >= width) break;
+                x += edge - overlap;
+            }
+            if (y + h >= height) break;
+            y += edge - overlap;
+        }
+        return tiles;
+    }
+
+    public static bool SameOcrRegion(int ax, int ay, int aw, int ah, int bx, int by, int bw, int bh) {
+        if (aw <= 0 || ah <= 0 || bw <= 0 || bh <= 0) return false;
+        long w = Math.Min((long)ax + aw, (long)bx + bw) - Math.Max(ax, bx);
+        long h = Math.Min((long)ay + ah, (long)by + bh) - Math.Max(ay, by);
+        if (w <= 0 || h <= 0) return false;
+        double area = (double)w * h;
+        double minArea = Math.Min((double)aw * ah, (double)bw * bh);
+        return area >= 0.6 * minArea;
+    }
+
+    public static void FlattenAlpha(System.Drawing.Bitmap bmp) {
+        if (bmp == null || bmp.PixelFormat != System.Drawing.Imaging.PixelFormat.Format32bppArgb) return;
+        var rect = new System.Drawing.Rectangle(0, 0, bmp.Width, bmp.Height);
+        var data = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadWrite, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        try {
+            int bytes = Math.Abs(data.Stride) * bmp.Height;
+            byte[] rgb = new byte[bytes];
+            System.Runtime.InteropServices.Marshal.Copy(data.Scan0, rgb, 0, bytes);
+            for (int i = 0; i < bytes; i += 4) {
+                byte b = rgb[i];
+                byte g = rgb[i + 1];
+                byte r = rgb[i + 2];
+                byte a = rgb[i + 3];
+                if (a < 255) {
+                    rgb[i] = (byte)((b * a + 255 * (255 - a) + 127) / 255);
+                    rgb[i + 1] = (byte)((g * a + 255 * (255 - a) + 127) / 255);
+                    rgb[i + 2] = (byte)((r * a + 255 * (255 - a) + 127) / 255);
+                    rgb[i + 3] = 255;
+                }
+            }
+            System.Runtime.InteropServices.Marshal.Copy(rgb, 0, data.Scan0, bytes);
+        } finally {
+            bmp.UnlockBits(data);
+        }
+    }
+
+    public static void DrawOcrMarks(System.Drawing.Bitmap bmp, int[] rects, string[] labels) {
+        if (bmp == null || rects == null || labels == null) return;
+        using (var g = System.Drawing.Graphics.FromImage(bmp)) {
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var pen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(220, 235, 30, 30), 2))
+            using (var fillBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(40, 255, 50, 50)))
+            using (var tagBg = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(210, 20, 20, 20)))
+            using (var textBrush = new System.Drawing.SolidBrush(System.Drawing.Color.White))
+            using (var font = new System.Drawing.Font(System.Drawing.FontFamily.GenericSansSerif, 9, System.Drawing.FontStyle.Bold)) {
+                int count = Math.Min(rects.Length / 4, labels.Length);
+                for (int i = 0; i < count; i++) {
+                    int rx = rects[i * 4];
+                    int ry = rects[i * 4 + 1];
+                    int rw = rects[i * 4 + 2];
+                    int rh = rects[i * 4 + 3];
+                    if (rw <= 0 || rh <= 0) continue;
+                    g.FillRectangle(fillBrush, rx, ry, rw, rh);
+                    g.DrawRectangle(pen, rx, ry, rw, rh);
+                    string label = labels[i];
+                    if (!string.IsNullOrEmpty(label)) {
+                        var size = g.MeasureString(label, font);
+                        int tagW = (int)size.Width + 4;
+                        int tagH = (int)size.Height + 2;
+                        int tagY = ry >= tagH ? ry - tagH : ry;
+                        g.FillRectangle(tagBg, rx, tagY, tagW, tagH);
+                        g.DrawString(label, font, textBrush, rx + 2, tagY + 1);
+                    }
+                }
+            }
+        }
+    }
+
     // Перечисление верхнеуровневых окон через user32, а не через UIA.
     // Причина замерами: FindWindowByTitle шёл через
     // AutomationElement.RootElement.FindAll, и когда в системе висит
@@ -1137,8 +1234,34 @@ $script:InteractiveTypes = @(
     'Slider','Spinner','ProgressBar','SplitButton','Menu','MenuBar','ToolBar'
 )
 
+function Get-AvailableOcrLangs {
+    param([switch]$TagOnly)
+    try {
+        [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
+        $langs = [Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages
+        $res = @()
+        foreach ($l in @($langs)) {
+            if ($TagOnly) { $res += $l.LanguageTag }
+            else {
+                $res += [ordered]@{
+                    tag = $l.LanguageTag
+                    name = $l.DisplayName
+                }
+            }
+        }
+        return $res
+    } catch {
+        return @()
+    }
+}
+
 function Invoke-ScreenOcr {
-    param([string]$Path, [string]$Lang)
+    param(
+        [string]$Path,
+        [string]$Lang,
+        [bool]$IncludeWords = $true,
+        [string]$Mark = ''
+    )
     $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
         $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
     })[0]
@@ -1157,49 +1280,150 @@ function Invoke-ScreenOcr {
         Language     = [Windows.Globalization.Language, Windows.Foundation, ContentType = WindowsRuntime]
         RandomStream = [Windows.Storage.Streams.IRandomAccessStream, Windows.Foundation, ContentType = WindowsRuntime]
     }
-    $sf  = Await ($T.StorageFile::GetFileFromPathAsync($Path)) $T.StorageFile
-    $ras = Await ($sf.OpenAsync($T.FileAccess::Read)) $T.RandomStream
-    $dec = Await ($T.Decoder::CreateAsync($ras)) $T.Decoder
-    $sb  = Await ($dec.GetSoftwareBitmapAsync()) $T.SoftBitmap
     $eng = $null
-    if ($Lang) { $eng = $T.OcrEngine::TryCreateFromLanguage($T.Language::new($Lang)) }
-    if (-not $eng) { $eng = $T.OcrEngine::TryCreateFromUserProfileLanguages() }
+    if ($Lang) {
+        try { $eng = $T.OcrEngine::TryCreateFromLanguage($T.Language::new($Lang)) } catch { }
+        if (-not $eng) {
+            $tags = (Get-AvailableOcrLangs -TagOnly) -join ', '
+            Fail 'NotSupported' "Язык '$Lang' не установлен для Windows OCR. Доступные языки: $tags"
+        }
+    } else {
+        $eng = $T.OcrEngine::TryCreateFromUserProfileLanguages()
+    }
     if (-not $eng) { Fail 'NotSupported' "Не удалось создать OCR-движок: нет ни языка $Lang, ни языков профиля" }
-    $res = Await ($eng.RecognizeAsync($sb)) $T.OcrResult
-    $lines = @()
-    # WinRT-коллекции (IReadOnlyList) приводим к массиву явно: PowerShell
-    # разворачивает их при обращении к .Count, и количество получается
-    # перечислением значений вместо числа.
-    foreach ($l in @($res.Lines)) {
-        $wordArr = @($l.Words)
-        if ($wordArr.Count -eq 0) { continue }
-        $words = @()
-        foreach ($w in $wordArr) {
-            $b = $w.BoundingRect
-            $words += [ordered]@{
-                text = $w.Text
-                rect = [ordered]@{ x = [int]$b.X; y = [int]$b.Y; w = [int]$b.Width; h = [int]$b.Height }
+
+    $bmp = $null
+    $origW = 0; $origH = 0
+    try {
+        $bmp = [System.Drawing.Bitmap]::FromFile($Path)
+        $origW = $bmp.Width; $origH = $bmp.Height
+        [DeskMcp]::FlattenAlpha($bmp)
+    } catch { }
+
+    $edge = [Math]::Min(2600, [Windows.Media.Ocr.OcrEngine]::MaxImageDimension)
+    $overlap = [Math]::Min(128, [int]($edge / 8))
+
+    function Recognize-File($filePath, $offsetX, $offsetY) {
+        $sf  = Await ($T.StorageFile::GetFileFromPathAsync($filePath)) $T.StorageFile
+        $ras = Await ($sf.OpenAsync($T.FileAccess::Read)) $T.RandomStream
+        $dec = Await ($T.Decoder::CreateAsync($ras)) $T.Decoder
+        $sb  = Await ($dec.GetSoftwareBitmapAsync()) $T.SoftBitmap
+        $res = Await ($eng.RecognizeAsync($sb)) $T.OcrResult
+        $resLines = @()
+        foreach ($l in @($res.Lines)) {
+            $wordArr = @($l.Words)
+            if ($wordArr.Count -eq 0) { continue }
+            $words = @()
+            if ($IncludeWords) {
+                foreach ($w in $wordArr) {
+                    $b = $w.BoundingRect
+                    $words += [ordered]@{
+                        text = $w.Text
+                        rect = [ordered]@{ x = [int]($b.X + $offsetX); y = [int]($b.Y + $offsetY); w = [int]$b.Width; h = [int]$b.Height }
+                    }
+                }
+            }
+            $b0 = $wordArr[0].BoundingRect
+            $bN = $wordArr[$wordArr.Count - 1].BoundingRect
+            $lineObj = [ordered]@{
+                text = $l.Text
+                rect = [ordered]@{
+                    x = [int]($b0.X + $offsetX)
+                    y = [int]($b0.Y + $offsetY)
+                    w = [int](($bN.X + $bN.Width) - $b0.X)
+                    h = [int](($bN.Y + $bN.Height) - $b0.Y)
+                }
+            }
+            if ($IncludeWords) { $lineObj['words'] = $words }
+            $resLines += $lineObj
+        }
+        return $resLines
+    }
+
+    $allLines = @()
+    if ($origW -gt 0 -and $origH -gt 0 -and ($origW -gt $edge -or $origH -gt $edge) -and $bmp) {
+        $tileList = [DeskMcp]::GetOcrTiles($origW, $origH, $edge, $overlap)
+        foreach ($tile in $tileList) {
+            $tileBmp = New-Object System.Drawing.Bitmap $tile.Width, $tile.Height
+            $g = [System.Drawing.Graphics]::FromImage($tileBmp)
+            $srcRect = New-Object System.Drawing.Rectangle $tile.X, $tile.Y, $tile.Width, $tile.Height
+            $destRect = New-Object System.Drawing.Rectangle 0, 0, $tile.Width, $tile.Height
+            $g.DrawImage($bmp, $destRect, $srcRect, [System.Drawing.GraphicsUnit]::Pixel)
+            $g.Dispose()
+
+            $tmpTileBase = [System.IO.Path]::GetTempFileName()
+            $tmpTile = "$tmpTileBase.png"
+            try {
+                $tileBmp.Save($tmpTile, [System.Drawing.Imaging.ImageFormat]::Png)
+                $tileBmp.Dispose()
+                $tLines = Recognize-File $tmpTile $tile.X $tile.Y
+                foreach ($tl in $tLines) {
+                    $dup = $false
+                    for ($i = 0; $i -lt $allLines.Count; $i++) {
+                        $ex = $allLines[$i]
+                        if ($ex.text -eq $tl.text -and [DeskMcp]::SameOcrRegion($ex.rect.x, $ex.rect.y, $ex.rect.w, $ex.rect.h, $tl.rect.x, $tl.rect.y, $tl.rect.w, $tl.rect.h)) {
+                            $dup = $true
+                            if (($tl.rect.w * $tl.rect.h) -gt ($ex.rect.w * $ex.rect.h)) {
+                                $allLines[$i] = $tl
+                            }
+                            break
+                        }
+                    }
+                    if (-not $dup) { $allLines += $tl }
+                }
+            } finally {
+                Remove-Item $tmpTile -Force -ErrorAction SilentlyContinue
+                Remove-Item $tmpTileBase -Force -ErrorAction SilentlyContinue
             }
         }
-        $b0 = $wordArr[0].BoundingRect
-        $bN = $wordArr[$wordArr.Count - 1].BoundingRect
-        $lines += [ordered]@{
-            text = $l.Text
-            rect = [ordered]@{
-                x = [int]$b0.X
-                y = [int]$b0.Y
-                w = [int](($bN.X + $bN.Width) - $b0.X)
-                h = [int](($bN.Y + $bN.Height) - $b0.Y)
+        $allLines = @($allLines | Sort-Object { $_.rect.y * 100000 + $_.rect.x })
+    } else {
+        $runPath = $Path
+        $tmpFlatBase = $null
+        if ($bmp) {
+            $tmpFlatBase = [System.IO.Path]::GetTempFileName()
+            $runPath = "$tmpFlatBase.png"
+            $bmp.Save($runPath, [System.Drawing.Imaging.ImageFormat]::Png)
+        }
+        try {
+            $allLines = Recognize-File $runPath 0 0
+        } finally {
+            if ($tmpFlatBase) {
+                Remove-Item $runPath -Force -ErrorAction SilentlyContinue
+                Remove-Item $tmpFlatBase -Force -ErrorAction SilentlyContinue
             }
-            words = $words
         }
     }
-    return [ordered]@{
-        text = $res.Text
-        lineCount = $lines.Count
-        lines = $lines
-        image = [ordered]@{ x = 0; y = 0; w = $sb.PixelWidth; h = $sb.PixelHeight }
+
+    $ret = [ordered]@{
+        text = ($allLines | ForEach-Object { $_.text }) -join "`n"
+        lineCount = $allLines.Count
+        lines = $allLines
+        image = [ordered]@{ x = 0; y = 0; w = $origW; h = $origH }
     }
+
+    if ($Mark -eq 'rect' -and $bmp -and $allLines.Count -gt 0) {
+        $flatRects = New-Object 'System.Collections.Generic.List[int]'
+        $labels = New-Object 'System.Collections.Generic.List[string]'
+        $idx = 1
+        foreach ($l in $allLines) {
+            $flatRects.Add([int]$l.rect.x)
+            $flatRects.Add([int]$l.rect.y)
+            $flatRects.Add([int]$l.rect.w)
+            $flatRects.Add([int]$l.rect.h)
+            $labels.Add([string]$idx)
+            $l['markNumber'] = $idx
+            $idx++
+        }
+        [DeskMcp]::DrawOcrMarks($bmp, $flatRects.ToArray(), $labels.ToArray())
+        $ms = New-Object System.IO.MemoryStream
+        $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+        $ret['markedImage'] = "data:image/png;base64," + [Convert]::ToBase64String($ms.ToArray())
+        $ms.Dispose()
+    }
+
+    if ($bmp) { $bmp.Dispose() }
+    return $ret
 }
 
 $script:UiCache = @{}
@@ -2028,9 +2252,11 @@ function Invoke-Tool {
                         w = $_.Bounds.Width; h = $_.Bounds.Height
                     }
                 }
+                $availLangs = Get-AvailableOcrLangs -TagOnly
                 $result = [ordered]@{
                     virtual = [ordered]@{ x = $vs.Left; y = $vs.Top; w = $vs.Width; h = $vs.Height }
                     monitors = @($monitors)
+                    ocrLanguages = @($availLangs)
                 }
             }
 
@@ -2523,6 +2749,16 @@ function Invoke-Tool {
             }
 
             'ocr' {
+                if ($a.languages -or $a.lang -eq 'list') {
+                    $avail = Get-AvailableOcrLangs
+                    $defLang = [Windows.Globalization.Language, Windows.Foundation, ContentType = WindowsRuntime]::new((Get-Culture).Name).LanguageTag
+                    $result = [ordered]@{
+                        ok = $true
+                        languages = $avail
+                        default = $defLang
+                    }
+                    break
+                }
                 $region = if ($a.region) { [string]$a.region } else { '0,0,2560,1440' }
                 $rp = $region -split ','
                 if ($rp.Count -ne 4) { Fail 'InvalidArgument' "Region должен быть 'x,y,w,h', получено '$region'" }
@@ -2540,8 +2776,10 @@ function Invoke-Tool {
                 } finally {
                     if ($bmp) { $bmp.Dispose() }
                 }
+                $words = if ($null -ne $a.words) { [bool]$a.words } else { $true }
+                $mark = if ($a.mark) { [string]$a.mark } else { '' }
                 try {
-                    $r = Invoke-ScreenOcr -Path $tmp -Lang ([string]$a.lang)
+                    $r = Invoke-ScreenOcr -Path $tmp -Lang ([string]$a.lang) -IncludeWords $words -Mark $mark
                 } finally {
                     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
                     Remove-Item $tmpBase -Force -ErrorAction SilentlyContinue

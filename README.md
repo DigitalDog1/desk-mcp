@@ -186,7 +186,7 @@ Key takeaways from real-window measurements:
 **Eyes**
 
 - `computer_screenshot`: whole screen, any region, or a single window through `PrintWindow` or `hwnd`, working even on occluded and minimized windows. PNG or JPEG, any scale.
-- `computer_ocr`: text straight from pixels with Windows built-in OCR (`Windows.Media.Ocr`, en and ru). Words come back with bounding boxes so you can click on them. As an unguided fallback it is noisy: on the demo window it turned `ZX-4471-8820` into `zx-=v-882C`.
+- `computer_ocr`: text straight from pixels with Windows built-in OCR (`Windows.Media.Ocr`). Supports 4K/8K tile slicing, transparency alpha compensation, listing installed languages (`languages: true`), and Set-of-Marks visual overlay badges (`mark: "rect"`). Words come back with bounding boxes so you can click on them.
 - `computer_screeninfo`: virtual screen bounds and every attached monitor.
 - `computer_permissions`: checks whether UI Automation, clipboard, and window enumeration actually work on this machine, failing fast at setup instead of midway through an agent run.
 

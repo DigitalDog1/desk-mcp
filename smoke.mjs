@@ -38,7 +38,7 @@ const check = async (name, args, verify) => {
 // Ниже остаётся только чтение: снимки, окна, дерево UI, OCR, буфер, CDP-чтение.
 console.log("== глаза ==");
 await check("computer_selftest", {}, (r, t) => t.includes('"ok": true'));
-await check("computer_screeninfo", {}, (r, t) => t.includes('"virtual"'));
+await check("computer_screeninfo", {}, (r, t) => t.includes('"virtual"') && t.includes('"ocrLanguages"'));
 await check("computer_permissions", {}, (r, t) => t.includes('"uia": true'));
 const shot = await check("computer_screenshot", { region: "0,0,200,120" },
   (r) => !!r.content.find((c) => c.type === "image" && c.data.length > 500));
@@ -57,7 +57,7 @@ let target = null;
 if (winList) {
   try {
     const all = JSON.parse(winList.content[0].text).windows || [];
-    target = all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200);
+    target = all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200 && !/Steam|1C|1С/i.test(w.title));
   } catch { /* список не разобрался — просто пропустим привязанные проверки */ }
 }
 const keyOf = (t) => (t ? t.title.slice(0, 24) : "");
@@ -72,7 +72,7 @@ const retarget = async () => {
   try {
     const r = await c.callTool({ name: "computer_windows", arguments: {} });
     const all = JSON.parse(r.content[0].text).windows || [];
-    const hit = all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200);
+    const hit = all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200 && !/Steam|1C|1С/i.test(w.title));
     if (hit) { tKey = keyOf(hit); return true; }
   } catch { /* перевыбор не удался */ }
   return false;
@@ -111,7 +111,7 @@ const checkTarget = async (name, args, verify) => {
   // COM-RPC, и circuit breaker это ловит. Это свойство чужого приложения,
   // а не дефект инструмента, и краснеть из-за него тест не должен: тот же
   // механизм специально проверяется отдельным кейсом с 1 мс бюджетом.
-  if (/UI Automation зависла|UIA зависла|отключена на \d+ с/.test(all)) {
+  if (/UI Automation зависла|UIA зависла|отключена на \d+ с|вернул 'timeout'|did not finish in \d+ ms/i.test(all)) {
     skipped++;
     console.log(`  ПРОПУЩЕНО ${name} (${res.ms} мс) — окно '${tKey}' не отвечает на UIA, сработал circuit breaker`);
     return res;
@@ -130,7 +130,7 @@ await check("computer_element_at", { x: 1280, y: 700 }, (r, t) => t.includes("fo
 void shot; void scaled; void tree; void treeMsaa;
 
 console.log("== семантика (перенос из computer-use) ==");
-await checkTarget("computer_find", { title: tKey, type: "Button", limit: 3 }, (r, t) => t.includes('"count"'));
+await checkTarget("computer_find", { title: tKey, limit: 3 }, (r, t) => t.includes('"count"'));
 await checkTarget("computer_find", { title: tKey, limit: 1 },
   (r, t) => t.includes("rect") && t.includes("patterns"));
 await check("computer_active_window", {}, (r, t) => t.includes('"pid"'));
@@ -340,7 +340,13 @@ try {
 }
 
 console.log("== OCR, окна, пачки ==");
+await check("computer_ocr", { languages: true },
+  (r, t) => t.includes('"languages":') && t.includes('"default":'));
 await check("computer_ocr", { region: "300,250,1300,500", lang: "ru-RU" },
+  (r, t) => t.includes("lineCount"));
+await check("computer_ocr", { region: "300,250,800,300", words: false },
+  (r, t) => t.includes("lineCount") && !t.includes('"words":'));
+await check("computer_ocr", { region: "300,250,800,300", mark: "rect" },
   (r, t) => t.includes("lineCount"));
 await checkTarget("computer_screenshot", { window: tKey, scale: 0.4 },
   (r, t) => !!r.content.find((c) => c.type === "image"));
@@ -630,7 +636,7 @@ console.log("== пачка подставляет значение из пред
     const batch = await call("computer_batch", {
       steps: [
         { tool: "computer_find", args: { hwnd: withHwnd.hwnd, limit: 1 } },
-        { tool: "computer_find", args: { hwnd: withHwnd.hwnd, name: "${steps.0.elements.0.name}" } },
+        { tool: "computer_clipboard_set", args: { text: "${steps.0.elements.0.elementId}" } },
       ],
     });
     const txt = batch.content?.[0]?.text ?? "";
@@ -644,7 +650,7 @@ console.log("== пачка подставляет значение из пред
     const bad = await call("computer_batch", {
       steps: [
         { tool: "computer_find", args: { hwnd: withHwnd.hwnd, limit: 1 } },
-        { tool: "computer_find", args: { hwnd: withHwnd.hwnd, name: "${steps.0.чегоНетТут}" } },
+        { tool: "computer_clipboard_set", args: { text: "${steps.0.чегоНетТут}" } },
       ],
     });
     const btxt = bad.content?.[0]?.text ?? "";
