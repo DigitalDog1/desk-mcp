@@ -1,6 +1,6 @@
 {
   "name": "desk-mcp",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "type": "module",
   "license": "Apache-2.0",
   "description": "MCP server for automating the Windows desktop: UI Automation, MSAA, Chrome DevTools Protocol, OCR and WinAPI input. Node.js plus the PowerShell that ships with Windows, no native modules.",
@@ -25,10 +25,15 @@
     "url": "https://github.com/DigitalDog1/desk-mcp/issues"
   },
   "author": "DigitalDog1",
-  "engines": { "node": ">=20" },
-  "bin": { "desk-mcp": "server.mjs" },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "desk-mcp": "server.mjs"
+  },
   "files": [
     "server.mjs",
+    "lib",
     "worker.ps1",
     "uia-native.cs",
     "bench.ps1",
@@ -36,19 +41,24 @@
     "examples/demo.mjs",
     "README.md",
     "LICENSE",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "README.ru.md"
   ],
   "scripts": {
     "start": "node server.mjs",
-    "test": "node smoke.mjs",
-    "check": "node --check server.mjs",
-    "bench": "node bench-tokens.mjs",
+    "test": "npm run test:unit && npm run test:smoke",
+    "check": "node --check server.mjs && node --check lib/worker.mjs && node --check lib/batch.mjs && node --check lib/cdp.mjs",
+    "bench": "node benchmark.mjs",
     "bench:full": "node bench-full.mjs",
-    "bench:fonts": "node bench-fonts.mjs",
-    "check:docs": "node check-docs.mjs"
+    "bench:fonts": "node benchmark.mjs",
+    "check:docs": "node check-docs.mjs",
+    "test:unit": "node --test test/*.test.mjs",
+    "test:smoke": "node smoke.mjs",
+    "check:package": "node check-package.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.31.0",
-    "zod": "^3.25.0"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
   }
 }

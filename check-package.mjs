@@ -1,0 +1,12 @@
+import { execFileSync } from "node:child_process";
+import assert from "node:assert/strict";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const root = path.dirname(fileURLToPath(import.meta.url));
+const npm = process.env.npm_execpath;
+assert(npm, "Run with npm run check:package");
+const result = JSON.parse(execFileSync(process.execPath, [npm, "pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, encoding: "utf8" }))[0];
+const paths = result.files.map((f) => f.path);
+for (const file of ["server.mjs", "lib/worker.mjs", "lib/batch.mjs", "lib/cdp.mjs", "worker.ps1", "uia-native.cs", "bench.ps1", "README.md", "README.ru.md", "LICENSE"]) assert(paths.includes(file), "Missing from package: " + file);
+assert(!paths.some((f) => f.includes("node_modules/") || f.endsWith(".tgz")), "Unwanted build artifact");
+console.log("Package contents OK: " + paths.length + " files, " + result.unpackedSize + " bytes unpacked");

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.1 — 2026-11-13
+
+- Fix worker startup races, rejection/timer cleanup, broken stdin and late execution after a request deadline.
+- Validate batch steps with their direct-call schemas; enforce disabled canonical aliases; retain typed references and per-step error codes.
+- Make CDP work on Node 20, reject pending requests on disconnect and reconnect to fresh targets. Verify intended click targets.
+- Cover omitted mutation tools in dry-run; avoid typing into the active window in smoke tests; make failed smoke runs exit nonzero.
+- Scope element IDs to a worker session; requireUnique searches cannot hide a second match behind limit: 1.
+- Update dependencies, CI matrix, packaging checks and both README languages. Preserve demo media.
+- Replace the simulated font benchmark with repeated live measurements and independent filesystem/result-file checks. See docs/benchmarks.md for the method and raw results.
+
+
 ## 1.5.0 (готовится)
 
 ### Добавлено

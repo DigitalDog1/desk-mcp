@@ -4,6 +4,8 @@
 # Used to benchmark tasks where target coordinates cannot be guessed by eye
 # and must be found from structured data vs. pixel scanning.
 #
+param([string]$ResultPath)
+
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -16,6 +18,12 @@ using System.IO;
 using System.Windows.Forms;
 
 public class FontCatalogForm : Form {
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool ShowWindow(IntPtr hwnd, int command);
+    protected override void OnLoad(EventArgs e) {
+        base.OnLoad(e);
+        ShowWindow(Handle, 5);
+    }
     int events = 0;
     string resultFile;
 
@@ -95,7 +103,7 @@ public class FontCatalogForm : Form {
                 if (lbl != null) lbl.Text = "Selected: " + name + " (" + size + " bytes)";
                 try {
                     File.WriteAllText(resultFile, name);
-                    Clipboard.SetText(name);
+
                 } catch { }
                 Note("SELECTED:" + name + ":" + size);
             } else {
@@ -115,7 +123,7 @@ public class FontCatalogForm : Form {
             if (lbl != null) lbl.Text = "No font selected.";
             try {
                 if (File.Exists(resultFile)) File.Delete(resultFile);
-                Clipboard.Clear();
+
             } catch { }
             Note("RESET");
         };
@@ -142,7 +150,7 @@ public class FontCatalogForm : Form {
 "@ -ReferencedAssemblies System.Windows.Forms, System.Drawing
 }
 
-$resPath = Join-Path $env:TEMP 'desk-mcp-font-result.txt'
+$resPath = if ($ResultPath) { $ResultPath } else { Join-Path $env:TEMP 'desk-mcp-font-result.txt' }
 if (Test-Path $resPath) { Remove-Item $resPath -Force }
 
 [System.Windows.Forms.Application]::EnableVisualStyles()

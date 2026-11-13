@@ -9,33 +9,32 @@ on:
 jobs:
   check:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: [20, 22, 24]
-
-      - name: Синтаксис
-        run: node --check server.mjs
-
-      - name: Установка
-        run: npm install --no-audit --no-fund
-
-      - name: Модули компилируются и воркер поднимается
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --no-fund
+      - run: npm run check
+      - run: npm run check:docs
+      - run: npm run test:unit
+      - name: PowerShell syntax and native UIA compilation
         shell: pwsh
         run: |
-          $w = 'worker.ps1'
-          $b = [System.IO.File]::ReadAllBytes($w)
-          if ($b[0] -ne 0xEF -or $b[1] -ne 0xBB -or $b[2] -ne 0xBF) {
-            Write-Error "$w обязан быть с BOM: Windows PowerShell 5.1 без BOM ломает кириллицу"
-            exit 1
-          }
-          $err = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $w), [ref]$null, [ref]$err)
-          if ($err) { $err | ForEach-Object { Write-Error $_.Message }; exit 1 }
-          '{"id":1,"tool":"selftest","args":{}}' |
-            & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File $w
-
-      - name: Автопрогон
-        run: npm test
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'worker.ps1'), [ref]$null, [ref]$errors)
+          if ($errors) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          $response = '{"id":1,"tool":"selftest","args":{}}' |
+            & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File worker.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $line = $response | Where-Object { $_ -like 'B64:*' } | Select-Object -Last 1
+          if (-not $line) { throw 'Worker returned no response' }
+          $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line.Substring(4))) | ConvertFrom-Json
+          if (-not $json.ok -or -not $json.data.nativeUia) { throw 'Native UIA layer failed to compile' }
+      - run: npm run test:smoke
+      - run: npm run check:package

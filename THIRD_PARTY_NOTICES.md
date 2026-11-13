@@ -24,6 +24,7 @@
 |---|---|
 | `@modelcontextprotocol/sdk` | MIT |
 | `zod` | MIT |
+| `ws` | MIT |
 
 ## Системные API
 

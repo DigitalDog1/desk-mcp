@@ -697,7 +697,7 @@ if ($env:DESK_ALLOW_TITLES) {
 $script:MutatingTools = @(
     'click', 'move', 'mouse_move', 'drag', 'scroll', 'mouse_button',
     'type', 'key', 'key_down', 'key_up',
-    'invoke', 'set_value', 'select_text',
+    'invoke', 'set_value', 'select_text', 'select', 'polyline', 'set_frame', 'clipboard_set', 'bench',
     'focus', 'close_window', 'launch', 'desktop'
 )
 
@@ -2792,6 +2792,11 @@ function Invoke-Tool {
                 $depth = if ($a.maxDepth) { [int]$a.maxDepth } else { 8 }
                 $limit = if ($a.limit) { [int]$a.limit } else { 20 }
                 $reqUnique = if ($a.requireUnique) { [bool]$a.requireUnique } else { $false }
+                if ($a.nameRegex) {
+                    try { [void][regex]::new([string]$a.nameRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase, [TimeSpan]::FromMilliseconds(250)) }
+                    catch { Fail 'InvalidArgument' "Некорректный nameRegex: $($_.Exception.Message)" }
+                }
+                if ($reqUnique -and $limit -lt 2) { $limit = 2 }
                 $searchName = if ($a.nameRegex) {
                     if ("$($a.nameRegex)".StartsWith('/') -and "$($a.nameRegex)".EndsWith('/')) {
                         [string]$a.nameRegex
@@ -2812,6 +2817,7 @@ function Invoke-Tool {
                             Fail 'AmbiguousMatch' "Найдено $cnt элементов, ожидался ровно один (requireUnique=true)"
                         }
                         $res = [ordered]@{ count = $cnt; elements = @($nat.elements) }
+                        if ($reqUnique -and $nat.searchIncomplete) { Fail 'AmbiguousMatch' 'Поиск неполный: уникальность элемента не подтверждена' }
                         if ($nat.searchIncomplete) { $res['searchIncomplete'] = $true }
                         return $res
                     }
@@ -2840,7 +2846,7 @@ function Invoke-Tool {
                         Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, нажать нельзя. Нажатие отчиталось бы успехом, но ничего не изменит."
                     }
                     if ($nat.status -eq 'stale' -or $nat.status -eq 'notFound') {
-                        Fail 'ElementNotFound' "$($nat.error)"
+                        Fail 'ElementNotFound' $(if ($nat.error) { [string]$nat.error } else { 'Элемент не найден по заданным условиям' })
                     }
                     if ($nat.status -eq 'noPattern' -and $a.elementId) {
                         Fail 'PatternUnavailable' "Элемент '$($nat.element.name)' не поддерживает нажатие (нет InvokePattern)"
@@ -2902,7 +2908,7 @@ function Invoke-Tool {
                             Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): поле отключено приложением, запись не пройдёт."
                         }
                         if ($nat.status -eq 'stale' -or $nat.status -eq 'notFound') {
-                            Fail 'ElementNotFound' "$($nat.error)"
+                            Fail 'ElementNotFound' $(if ($nat.error) { [string]$nat.error } else { 'Элемент не найден по заданным условиям' })
                         }
                         if ($nat.status -eq 'noPattern' -and $a.elementId) {
                             Fail 'PatternUnavailable' "Элемент '$($nat.element.name)' не поддерживает запись (нет ValuePattern)"
@@ -2974,6 +2980,7 @@ function Invoke-Tool {
                             }
                         }
                     }
+                    if (-not $focused) { Fail 'InputBlocked' 'Не удалось сфокусировать целевое поле; ввод отменён' }
                     Start-Sleep -Milliseconds 30
                     $null = [DeskMcp]::VKey(0x11, $false)
                     $null = [DeskMcp]::VKey(0x41, $false)
@@ -3086,7 +3093,7 @@ function Invoke-Tool {
                         Fail 'ElementDisabled' "Элемент '$($nat.element.name)' неактивен (enabled=false): приложение его отключило, выбирать нечего."
                     }
                     if ($nat.status -eq 'stale' -or $nat.status -eq 'notFound') {
-                        Fail 'ElementNotFound' "$($nat.error)"
+                        Fail 'ElementNotFound' $(if ($nat.error) { [string]$nat.error } else { 'Элемент не найден по заданным условиям' })
                     }
                     if ($nat.status -eq 'noPattern') {
                         Fail 'PatternUnavailable' $nat.error

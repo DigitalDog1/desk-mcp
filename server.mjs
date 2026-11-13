@@ -12,7 +12,9 @@ import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import readline from "node:readline";
+import { cdp } from "./lib/cdp.mjs";
+import { resolveArgs } from "./lib/batch.mjs";
+import { Worker } from "./lib/worker.mjs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -24,189 +26,7 @@ const READY_TIMEOUT_MS = 25_000;
 
 // --- воркер -------------------------------------------------------------------
 
-class Worker {
-  constructor() {
-    this.proc = null;
-    this.pending = new Map();
-    this.nextId = 1;
-    this.readyPromise = null;
-    this.restarts = 0;
-    this.startedAt = Date.now();
-  }
-
-  get alive() {
-    return !!this.proc && this.proc.exitCode === null && this.proc.signalCode === null;
-  }
-
-  start() {
-    const proc = spawn(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-STA", "-File", WORKER],
-      { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
-    );
-    this.proc = proc;
-
-    proc.stdout.setEncoding("utf8");
-    const lines = readline.createInterface({ input: proc.stdout });
-    lines.on("line", (line) => this.#onLine(line));
-
-    proc.stderr.setEncoding("utf8");
-    proc.stderr.on("data", (d) => {
-      const s = String(d).trim();
-      if (s) process.stderr.write(`[worker] ${s}\n`);
-    });
-
-    // Без этого Node падает с «Unhandled 'error' event» и голым стектрейсом,
-    // если powershell.exe не найден (битый PATH). Проверено ревьюером.
-    proc.on("error", (e) => {
-      process.stderr.write(`[worker] ошибка запуска: ${e.message}\n`);
-      this.#rejectAll(errWith(`Не удалось запустить PowerShell: ${e.message}`, "NotSupported"));
-    });
-
-    proc.on("exit", (code, signal) => {
-      if (this.proc !== proc) return;
-      process.stderr.write(`[worker] вышел (code=${code}, signal=${signal ?? "-"})`);
-      this.#rejectAll(errWith("Воркер неожиданно завершился", "WorkerRestarted"));
-    });
-
-    this.readyPromise = new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(errWith("Воркер не поднялся за 25 с", "WorkerRestarted")), READY_TIMEOUT_MS);
-      this.#onReady = (data) => {
-        clearTimeout(t);
-        this.#onReady = null;
-        resolve(data);
-      };
-    });
-  }
-
-  #onReady = null;
-
-  #rejectAll(err) {
-    for (const { reject } of this.pending.values()) reject(err);
-    this.pending.clear();
-  }
-
-  #onLine(line) {
-    if (!line.startsWith("B64:")) return;
-    let msg;
-    try {
-      msg = JSON.parse(Buffer.from(line.slice(4), "base64").toString("utf8"));
-    } catch {
-      return;
-    }
-    if (msg.id === 0 && this.#onReady) {
-      this.#onReady(msg.data);
-      return;
-    }
-    const entry = this.pending.get(msg.id);
-    if (!entry) return;
-    this.pending.delete(msg.id);
-    clearTimeout(entry.timer);
-    if (msg.ok) entry.resolve(msg.data);
-    else {
-      // Код ошибки рождается в PowerShell (Fail 'ElementNotFound' ...), но
-      // раньше он умирал здесь: агенту отдавался только текст, и машиночитаемой
-      // части отказа не существовало. Код переживает и обёртки PowerShell
-      // (там он дублируется в LastErrorCode), и эту границу тоже.
-      const err = new Error(msg.error || "Ошибка в воркере");
-      if (msg.code) err.code = msg.code;
-      entry.reject(err);
-    }
-  }
-
-  /**
-   * Воркер — единая точка отказа. Один зависший UIA-RPC в зависшее окно
-   * (классика UI Automation) убивает процесс, и без перезапуска канал мёртв
-   * до рестарта клиента, при том что MCP-сервер продолжает рекламировать все
-   * тулы как рабочие.
-   *
-   * Перезапуски с экспоненциальной паузой: без неё воркер, который падает
-   * каждый раз (например, UIA заблокирован), перезапускается в цикле и
-   * ест CPU. Счётчик сбрасывается, если воркер успешно проработал 30 с.
-   */
-  async ensure() {
-    if (this.alive) {
-      if (this.restarts > 0 && Date.now() - this.startedAt > 30_000) {
-        process.stderr.write(`[worker] стабилен, счётчик рестартов сброшен\n`);
-        this.restarts = 0;
-      }
-      return;
-    }
-    // Жёсткий отказ «канал не восстановить» был ловушкой: если висящее окно
-    // (1С, WPF, защищённое приложение) не уходит, шесть попыток — и все
-    // инструменты MCP-сервера мертвы до ручного перезапуска. Теперь это просто
-    // длинная пауза со сбросом: канал оживает при первой же возможности, даже
-    // после многих зависаний подряд.
-    if (this.restarts >= 5) {
-      this.restarts = 0;
-      process.stderr.write("[worker] много зависаний подряд — пауза 30 с и новая попытка\n");
-      await new Promise((r) => setTimeout(r, 30_000));
-    }
-    this.restarts++;
-    const delay = Math.min(500 * 2 ** (this.restarts - 1), 8000);
-    process.stderr.write(`[worker] перезапуск #${this.restarts} через ${delay} мс\n`);
-    await new Promise((r) => setTimeout(r, delay));
-    this.start();
-    try {
-      await this.readyPromise;
-    } catch (e) {
-      // Воркер не ответил ready за 25 с. Если процесс при этом жив, он
-      // становится зомби: alive === true, в stdin пишется, ответа нет, и
-      // каждый следующий вызов висит до своего таймаута. Убиваем сразу —
-      // ensure() поднимет новый при следующем обращении.
-      this.kill();
-      throw e;
-    }
-    this.startedAt = Date.now();
-  }
-
-  kill() {
-    if (!this.proc) return;
-    try {
-      this.proc.kill();
-    } catch { /* уже мёртв */ }
-    this.proc = null;
-  }
-
-  async call(tool, args, timeoutMs = CALL_TIMEOUT_MS) {
-    await this.ensure();
-    const proc = this.proc;
-    if (!this.alive) {
-      return Promise.reject(errWith("Воркер не запущен", "WorkerRestarted"));
-    }
-    const id = this.nextId++;
-    const payload = JSON.stringify({ id, tool, args: args ?? {} });
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        // Инструмент не ответил — почти всегда это зависший UIA-RPC
-        // (типично: приложение 1С или старое WPF). Процесс при этом жив и
-        // больше не вернётся, поэтому либо он мёртв для нас, либо через
-        // паузу разрешит. Убиваем: ensure() поднимет новый на следующем
-        // вызове, иначе канал мёртв до ручного рестарта.
-        process.stderr.write(`[worker] '${tool}' не ответил за ${timeoutMs / 1000} с — воркер перезапускается\n`);
-        this.kill();
-        reject(errWith(`Инструмент '${tool}' не ответил за ${timeoutMs / 1000} с; воркер перезапущен, повтори вызов`, "WorkerRestarted"));
-      }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
-      proc.stdin.write(payload + "\n", (err) => {
-        if (!err) return;
-        this.pending.delete(id);
-        clearTimeout(timer);
-        reject(errWith(`Запись в воркер не удалась: ${err.message}`, "WorkerRestarted"));
-      });
-    });
-  }
-
-  async stop() {
-    if (!this.proc) return;
-    this.proc.stdin.end();
-    this.proc.kill();
-  }
-}
-
-const worker = new Worker();
-worker.start();
+const worker = new Worker(WORKER);
 
 
 function errWith(message, code) {
@@ -245,12 +65,21 @@ const R = (fn) => async (args) => {
 //
 // Ключ блокировки — инструмент плюс окно. Окно может одно не отвечать, пока
 // остальные живы: блокировать всё подряд было бы наказанием за чужой баг.
-const UI_TIMEOUT_MS = Number(process.env.DESK_UI_TIMEOUT_MS) || 8_000;
-const UI_COOLDOWN_MS = Number(process.env.DESK_UI_COOLDOWN_MS) || 90_000;
+function positiveMs(name, fallback) {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 3_600_000) {
+    throw errWith(name + " должен быть целым числом от 1 до 3600000", "InvalidArgument");
+  }
+  return parsed;
+}
+const UI_TIMEOUT_MS = positiveMs("DESK_UI_TIMEOUT_MS", 8_000);
+const UI_COOLDOWN_MS = positiveMs("DESK_UI_COOLDOWN_MS", 90_000);
 const uiSuspect = new Map();
 
 function uiKey(tool, a) {
-  const t = a && typeof a === "object" ? a.title || a.id || "" : "";
+  const t = a && typeof a === "object" ? a.hwnd || a.title || a.elementId || "" : "";
   // PowerShell -like регистронезависим, поэтому 'ZzzBroken' и 'zzzbroken' — то
   // же окно. Без приведения к нижнему регистру блокировку обходили сменой
   // регистра одной буквы.
@@ -260,13 +89,6 @@ function uiKey(tool, a) {
 // Общий дедлайн на весь вызов, а не только на обмен с воркером: ensure() с
 // паузой 30 с при пяти зависаниях подряд выполняется ДО постановки таймера,
 // и объявленный бюджет в 8 с превращался в реальные 30+ с.
-function deadline(promise, ms, what) {
-  let timer;
-  const guard = new Promise((_, rej) => {
-    timer = setTimeout(() => rej(errWith(`${what} не успел за ${ms / 1000} с (включая ожидание перезапуска воркера)`, "Timeout")), ms);
-  });
-  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
-}
 
 async function callUi(tool, args, timeoutMs = UI_TIMEOUT_MS) {
   const key = uiKey(tool, args);
@@ -285,7 +107,7 @@ async function callUi(tool, args, timeoutMs = UI_TIMEOUT_MS) {
     );
   }
   try {
-    const r = await deadline(worker.call(tool, args, timeoutMs), timeoutMs + 2_000, `UI Automation '${key}'`);
+    const r = await worker.call(tool, args, timeoutMs);
     uiSuspect.delete(key);
     return r;
   } catch (e) {
@@ -312,7 +134,7 @@ const UI_TOOLS = new Set([
 
 // --- сервер -------------------------------------------------------------------
 
-const server = new McpServer({ name: "desk-mcp", version: "1.5.0" });
+const server = new McpServer({ name: "desk-mcp", version: "1.5.1" });
 
 const ok = (data) => ({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
 
@@ -336,12 +158,17 @@ const isDisabled = (name) =>
   DISABLE_PATTERNS.length > 0 && DISABLE_PATTERNS.some((re) => re.test(String(name).toLowerCase()));
 
 const disabledTools = [];
+const toolSchemas = new Map();
 function reg(name, config, handler) {
   if (isDisabled(name)) {
     disabledTools.push(name);
     return;
   }
-  server.registerTool(name, config, handler);
+  toolSchemas.set(name, z.object(config.inputSchema ?? {}));
+  const mutatingBrowser = ["computer_browser_start", "computer_browser_click", "computer_browser_eval"].includes(name);
+  server.registerTool(name, config, process.env.DESK_DRY_RUN === "1" && mutatingBrowser
+    ? R(async (args) => ok({ ok: true, dryRun: true, tool: name, would: args }))
+    : handler);
 }
 
 reg(
@@ -659,12 +486,12 @@ reg(
     inputSchema: {
       steps: z.array(z.object({
         tool: z.string().describe("имя инструмента desk-mcp"),
-        args: z.record(z.any()).optional(),
+        args: z.record(z.string(), z.any()).optional(),
         stopOnError: z.boolean().optional(),
       })).min(1).max(50),
     },
   },
-  R(async (a) => ok(await deadline(runBatch(a.steps), 120_000, "computer_batch"))),
+  R(async (a) => ok(await runBatch(a.steps))),
 );
 
 // Пачка исполняется на стороне сервера, по одному шагу, а не рекурсией внутри
@@ -693,49 +520,9 @@ const TOOL_ALIAS = {
 // Ссылка разрешается только на уже выполненные шаги: шаг не может читать будущее.
 // В сегментах пути кириллица разрешена: \w в JS её не покрывает, и ссылка с
 // русским именем поля молча не сматчилась бы, а её текст ушёл бы в действие.
-const STEP_REF = /\$\{steps\.(\d+)((?:\.[^\s.[\]]+|\[\d+\])*)\}/g;
 
-function resolveStepRef(str, done, where) {
-  const misses = [];
-  const value = str.replace(STEP_REF, (_, idx, path) => {
-    const i = Number(idx);
-    const prev = done.find((o) => o.index === i);
-    if (!prev) { misses.push(`шаг ${i} ещё не выполнен`); return ""; }
-    if (!prev.ok) { misses.push(`шаг ${i} провалился: ${prev.error ?? "?"}`); return ""; }
-    let cur = prev.data;
-    for (const part of path.match(/[^.[\]]+/g) ?? []) {
-      if (cur == null || cur === undefined) { misses.push(`нет ${path} в шаге ${i}`); return ""; }
-      cur = cur[/^\d+$/.test(part) ? Number(part) : part];
-    }
-    if (cur === undefined || cur === null) { misses.push(`нет ${path} в шаге ${i}`); return ""; }
-    return typeof cur === "object" ? JSON.stringify(cur) : String(cur);
-  });
-  // Молча подставить пустую строку хуже, чем отказать: действие ушло бы не туда.
-  // Страховка от кривой ссылки: если после подстановки остался кусок "${steps.",
-  // значит шаблон написан не по грамматике, и его текст не должен уехать в действие.
-  if (value.includes("${steps.")) misses.push(`ссылка не разобрана: "${value}"`);
-  if (misses.length) {
-    throw errWith(
-      `Подстановка не сработала (${misses.join("; ")}) в аргументе ${where}: "${str}". ` +
-        `Ссылка вида ${"${steps.Н.путь}"} читает результат шага Н из этого же пакета.`,
-      "InvalidArgument",
-    );
-  }
-  return value;
-}
-
-function resolveArgs(args, done) {
-  if (args === null || typeof args !== "object") return args;
-  if (Array.isArray(args)) return args.map((v) => resolveArgs(v, done));
-  const out = {};
-  for (const [k, v] of Object.entries(args)) {
-    if (typeof v === "string" && v.includes("${steps.")) out[k] = resolveStepRef(v, done, k);
-    else out[k] = resolveArgs(v, done);
-  }
-  return out;
-}
-
-async function runBatch(steps) {
+async function runBatch(steps, budgetMs = 120_000) {
+  const expires = Date.now() + budgetMs;
   const out = [];
   let stoppedAt = null;
   for (let i = 0; i < steps.length; i++) {
@@ -748,7 +535,7 @@ async function runBatch(steps) {
     const stopOnError = s.stopOnError !== false;
     if (!WORKER_TOOLS.has(tool)) {
       out.push({
-        index: i, tool: given, ok: false,
+        index: i, tool: given, ok: false, code: "InvalidArgument",
         error: `Неизвестный инструмент: '${given}'. Доступны: ${[...WORKER_TOOLS].join(", ")}`,
       });
       if (stopOnError) { stoppedAt = i; break; }
@@ -756,9 +543,11 @@ async function runBatch(steps) {
     }
     // Отключённый через DESK_DISABLE_TOOLS инструмент batch тоже не выполняет:
     // иначе список отключённых обходится одной пачкой, и защита дырявится.
-    if (isDisabled(given) || isDisabled(`computer_${tool}`)) {
+    const canonical = Object.keys(TOOL_ALIAS).find((name) => TOOL_ALIAS[name] === tool) ?? `computer_${tool}`;
+    if (isDisabled(canonical)) {
       out.push({
         index: i, tool: given, ok: false,
+        code: "NotSupported",
         error: `Инструмент '${given}' отключён через DESK_DISABLE_TOOLS`,
       });
       if (stopOnError) { stoppedAt = i; break; }
@@ -766,12 +555,21 @@ async function runBatch(steps) {
     }
     try {
       args = resolveArgs(args, out);
+      const parsed = toolSchemas.get(canonical)?.safeParse(args);
+      if (!parsed?.success) throw errWith("Некорректные аргументы " + canonical + ": " + (parsed?.error?.message ?? "нет схемы"), "InvalidArgument");
+      args = parsed.data;
+      const remaining = expires - Date.now();
+      if (remaining <= 0) throw errWith("Бюджет computer_batch исчерпан", "Timeout");
+      const budget = tool === "wait" ? args.ms + 1000
+        : tool === "wait_window" ? args.timeoutSec * 1000 + 5000
+        : tool === "wait_element" ? args.timeoutMs + 2000
+        : UI_TOOLS.has(tool) ? UI_TIMEOUT_MS : 60_000;
       const data = UI_TOOLS.has(tool)
-        ? await callUi(tool, args)
-        : await worker.call(tool, args, 60_000);
+        ? await callUi(tool, args, Math.min(remaining, Math.max(UI_TIMEOUT_MS, budget)))
+        : await worker.call(tool, args, Math.min(remaining, budget));
       out.push({ index: i, tool: given, ok: true, data });
     } catch (e) {
-      out.push({ index: i, tool: given, ok: false, error: e.message });
+      out.push({ index: i, tool: given, ok: false, code: e.code || "WorkerError", error: e.message });
       if (stopOnError) { stoppedAt = i; break; }
     }
   }
@@ -937,7 +735,7 @@ reg(
       button: z.enum(["left", "right", "middle"]).optional().default("left"),
     },
   },
-  R(async (a) => ok(await callUi("polyline", a))),
+  R(async (a) => ok(await worker.call("polyline", a))),
 );
 
 reg(
@@ -1030,7 +828,7 @@ reg(
       "перед кликом по элементу, который ещё перерисовывается, или между шагами в игре.",
     inputSchema: { ms: z.number().int().min(0).max(120000).optional().default(1000) },
   },
-  R(async (a) => ok(await worker.call("wait", a))),
+  R(async (a) => ok(await worker.call("wait", a, a.ms + 1000))),
 );
 
 reg(
@@ -1083,152 +881,6 @@ reg(
 // безымянными PANEL'ами. CDP даёт настоящий DOM: стабильные селекторы, текст,
 // роли из accessibility tree самого браузера. Это единственный способ работать с
 // веб-контентом не по пикселям.
-const cdp = {
-  port: 9222,
-  nextId: 1,
-  sockets: new Map(),
-
-  async http(path) {
-    const res = await fetch(`http://127.0.0.1:${cdp.port}${path}`, { signal: AbortSignal.timeout(4000) });
-    return res.json();
-  },
-
-  async version() {
-    return cdp.http("/json/version");
-  },
-
-  async targets() {
-    const list = await cdp.http("/json/list");
-    return list.filter((t) => t.type === "page" && t.webSocketDebuggerUrl);
-  },
-
-  // Документ может ещё грузиться, и тогда querySelectorAll вернёт пустоту без
-  // всякой ошибки: страница открылась, а дерева ноль. Наблюдалось на свеже
-  // поднятом Chrome. Поэтому перед разбором DOM ждём готовности.
-  async waitReady(client, timeoutMs) {
-    const deadline = Date.now() + Math.max(0, Math.min(10_000, timeoutMs));
-    for (;;) {
-      let state = "";
-      try {
-        state = await cdp.evaluate(client, "document.readyState");
-      } catch {
-        return { ready: false, state: "unreachable" };
-      }
-      if (state !== "loading") return { ready: true, state: state || "unknown" };
-      if (Date.now() >= deadline) return { ready: false, state: state };
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  },
-
-  // Открыть адрес в уже работающей вкладке. Запасной путь для /json/new: если
-  // браузер отвечает, но вкладку создать не дал (он умирает прямо на глазах,
-  // либо порт занят чужим процессом), навигация первой вкладки всё ещё работает.
-  async navigate(url) {    const pages = await cdp.targets();
-    if (!pages.length) return null;
-    const s = await cdp.socket(pages[0]);
-    await s.send("Page.enable", {});
-    await s.send("Page.navigate", { url });
-    return { id: pages[0].id, title: pages[0].title, url };
-  },
-
-  // /json/new требует именно PUT: на GET современные Chrome и Edge отвечают
-  // 405. Метод держим здесь, а не в вызывающем коде, потому что забыть про PUT
-  // — это молчаливое «вкладка не открылась».
-  async newTab(url) {
-    const res = await fetch(`http://127.0.0.1:${cdp.port}/json/new?${encodeURIComponent(url)}`, {
-      method: "PUT",
-      signal: AbortSignal.timeout(6000),
-    });
-    if (!res.ok) throw new Error(`CDP не смог открыть вкладку: HTTP ${res.status} ${await res.text().catch(() => "")}`);
-    return res.json();
-  },
-
-  async socket(target) {
-    const key = target.id ?? target.url;
-    if (cdp.sockets.has(key)) return cdp.sockets.get(key);
-    const ws = new WebSocket(target.webSocketDebuggerUrl);
-    // Карта pending обязана быть одна и та же у обработчика ответов и у send.
-    // Раньше обработчик смотрел в локальную pending, а send писал в
-    // client.pending — две разные карты, ответы молча терялись и каждый вызов
-    // висел до таймаута.
-    const client = { ws, pending: new Map(), send: null };
-    await new Promise((resolve, reject) => {
-      ws.addEventListener("open", resolve, { once: true });
-      ws.addEventListener("error", () => reject(new Error("Не удалось подключиться к CDP")), { once: true });
-    });
-    client.send = (method, params) => cdp.send(client, method, params);
-    ws.addEventListener("message", (ev) => {
-      let msg;
-      try {
-        msg = JSON.parse(ev.data);
-      } catch {
-        return;
-      }
-      const entry = client.pending.get(msg.id);
-      if (!entry) return;
-      client.pending.delete(msg.id);
-      if (msg.error) entry.reject(new Error(`${msg.error.message} (${msg.error.code})`));
-      else entry.resolve(msg.result);
-    });
-    ws.addEventListener("close", () => cdp.sockets.delete(key));
-    cdp.sockets.set(key, client);
-    return client;
-  },
-
-  send(client, method, params = {}) {
-    const id = cdp.nextId++;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        client.pending.delete(id);
-        reject(new Error(`CDP: ${method} не ответил за 15 с`));
-      }, 15_000);
-      client.pending.set(id, {
-        resolve: (v) => {
-          clearTimeout(timer);
-          resolve(v);
-        },
-        reject: (e) => {
-          clearTimeout(timer);
-          reject(e);
-        },
-      });
-      client.ws.send(JSON.stringify({ id, method, params }));
-    });
-  },
-
-  async evaluate(client, expression) {
-    const r = await client.send("Runtime.evaluate", {
-      expression,
-      returnByValue: true,
-      awaitPromise: true,
-    });
-    if (r.exceptionDetails) {
-      throw new Error(r.exceptionDetails.exception?.description ?? "JS бросил исключение");
-    }
-    return r.result?.value;
-  },
-
-  async pickTarget(urlHint) {
-    const targets = await cdp.targets();
-    if (!targets.length) throw new Error("Нет ни одной вкладки — сначала computer_browser_start");
-    if (!urlHint) return targets[0];
-    // Ищем и по URL, и по заголовку: параметр называется url, но вызывающий
-    // почти всегда знает именно заголовок вкладки. Раньше поиск шёл только по
-    // URL, и на подсказку «Вкладка не найдена» выводился список заголовков,
-    // в котором нужная вкладка была — выглядит как поломка поиска.
-    const lower = String(urlHint).toLowerCase();
-    const hit =
-      targets.find((t) => t.url.includes(urlHint))
-      ?? targets.find((t) => (t.title ?? "").toLowerCase().includes(lower));
-    if (!hit) {
-      throw new Error(
-        `Вкладка с '${urlHint}' не найдена (ищем по URL и по заголовку). ` +
-          `Есть: ${targets.map((t) => `${t.title} <${t.url.slice(0, 60)}>`).join(" | ")}`,
-      );
-    }
-    return hit;
-  },
-};
 
 const PROBE_JS = `(() => {
   window.__deskProbe = [];
@@ -1241,6 +893,7 @@ const PROBE_JS = `(() => {
         text: (el.innerText || el.value || el.getAttribute("aria-label") || "").toString().slice(0, 120),
         id: el.id || null,
         testid: el.getAttribute("data-testid"),
+        matchesTarget: !!el.closest(window.__deskProbeSelector),
         trusted: e.isTrusted
       });
     }, true);
@@ -1326,7 +979,7 @@ reg(
     },
   },
   R(async (a) => {
-    cdp.port = a.port ?? 9222;
+    cdp.setPort(a.port ?? 9222);
     try {
       const v = await cdp.version();
       // Браузер уже слушает порт. Раньше url в этом случае просто терялся:
@@ -1395,7 +1048,11 @@ reg(
       "about:blank",
     ];
     if (a.url) args[args.length - 1] = a.url;
-    const child = spawn(exe, args, { detached: true, stdio: "ignore" });
+    const child = spawn(exe, args, { detached: true, stdio: "ignore", windowsHide: true });
+    await new Promise((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", (e) => reject(errWith("Не удалось запустить браузер: " + e.message, "NotSupported")));
+    });
     child.unref();
 
     for (let i = 0; i < 30; i++) {
@@ -1492,15 +1149,16 @@ reg(
     const strike = async () => {
       for (let i = 0; i < a.clickCount; i++) {
         await client.send("Input.dispatchMouseEvent", {
-          type: "mousePressed", x: BOX.x, y: BOX.y, button: a.button, clickCount: 1,
+          type: "mousePressed", x: BOX.x, y: BOX.y, button: a.button, clickCount: i + 1,
         });
         await client.send("Input.dispatchMouseEvent", {
-          type: "mouseReleased", x: BOX.x, y: BOX.y, button: a.button, clickCount: 1,
+          type: "mouseReleased", x: BOX.x, y: BOX.y, button: a.button, clickCount: i + 1,
         });
         if (i + 1 < a.clickCount) await new Promise((r) => setTimeout(r, 60));
       }
     };
 
+    await cdp.evaluate(client, "window.__deskProbeSelector = " + JSON.stringify(a.selector));
     await cdp.evaluate(client, PROBE_JS);
     const before = await cdp.evaluate(client, "location.href");
 
@@ -1542,10 +1200,10 @@ reg(
     return ok({
       ok: true,
       selector: a.selector,
-      verified: hits.length > 0 || navigated,
-      via: hits.length > 0 ? "probe" : navigated ? "navigation" : "none",
+      verified: hits.some((hit) => hit.matchesTarget === true),
+      via: hits.some((hit) => hit.matchesTarget === true) ? "probe" : navigated ? "navigation" : "none",
       retried,
-      hit: hits[0] ?? null,
+      hit: hits.find((hit) => hit.matchesTarget === true) ?? hits[0] ?? null,
       urlBefore: before,
       urlAfter: after,
     });
@@ -1571,10 +1229,11 @@ reg(
 // --- запуск -------------------------------------------------------------------
 
 async function main() {
-  const ready = await worker.readyPromise;
+  const ready = await worker.start();
   process.stderr.write(`[desk-mcp] воркер готов: pid ${ready.pid}, PowerShell ${ready.powershell}\n`);
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  process.stdin.once("end", () => { cdp.close(); void worker.stop(); });
   // Список отключённых уходит в stderr, а не в ответ на вызов: иначе агент
   // узнает о запрете постфактум, уже потратив на него попытку.
   if (disabledTools.length) {
@@ -1583,8 +1242,8 @@ async function main() {
   process.stderr.write("[desk-mcp] MCP-сервер слушает stdio\n");
 }
 
-process.on("SIGINT", () => worker.stop().finally(() => process.exit(0)));
-process.on("SIGTERM", () => worker.stop().finally(() => process.exit(0)));
+process.on("SIGINT", () => { cdp.close(); return worker.stop().finally(() => process.exit(0)); });
+process.on("SIGTERM", () => { cdp.close(); return worker.stop().finally(() => process.exit(0)); });
 
 main().catch((e) => {
   process.stderr.write(`[desk-mcp] запуск не удался: ${e?.stack ?? e}\n`);
