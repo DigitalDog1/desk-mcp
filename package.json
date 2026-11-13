@@ -52,7 +52,7 @@
     "bench:full": "node bench-full.mjs",
     "bench:fonts": "node benchmark.mjs",
     "check:docs": "node check-docs.mjs",
-    "test:unit": "node --test test/*.test.mjs",
+    "test:unit": "node --test",
     "test:smoke": "node smoke.mjs",
     "check:package": "node check-package.mjs"
   },

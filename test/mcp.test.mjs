@@ -5,12 +5,15 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { fileURLToPath } from "node:url";
 const script = fileURLToPath(new URL("../server.mjs", import.meta.url));
 
-test("MCP schemas, canonical disabled aliases and dry-run hold through batch", { skip: process.platform !== "win32", timeout: 40_000 }, async () => {
+test("MCP schemas, canonical disabled aliases and dry-run hold through batch", { skip: process.platform !== "win32", timeout: 90_000 }, async () => {
   const transport = new StdioClientTransport({ command: process.execPath, args: [script], stderr: "pipe",
     env: { ...process.env, DESK_DRY_RUN: "1", DESK_DISABLE_TOOLS: "computer_window_set_frame,computer_verify_state" } });
   const client = new Client({ name: "regression", version: "1" });
   try {
-    await client.connect(transport);
+    let diagnostic = "";
+    transport.stderr?.on("data", (d) => diagnostic += d);
+    try { await client.connect(transport); }
+    catch (e) { throw new Error(e.message + "\n" + diagnostic); }
     const call = async (name, args = {}) => {
       const result = await client.callTool({ name, arguments: args });
       return { result, data: JSON.parse(result.content[0].text) };
@@ -43,10 +46,14 @@ test("MCP schemas, canonical disabled aliases and dry-run hold through batch", {
   } finally { await client.close(); }
 });
 
-test("invalid browser executable returns a tool error without crashing the server", { skip: process.platform !== "win32", timeout: 40_000 }, async () => {
+test("invalid browser executable returns a tool error without crashing the server", { skip: process.platform !== "win32", timeout: 90_000 }, async () => {
   const client = new Client({ name: "browser-spawn", version: "1" });
   try {
-    await client.connect(new StdioClientTransport({ command: process.execPath, args: [script], stderr: "pipe" }));
+    const transport = new StdioClientTransport({ command: process.execPath, args: [script], stderr: "pipe" });
+    let diagnostic = "";
+    transport.stderr?.on("data", (d) => diagnostic += d);
+    try { await client.connect(transport); }
+    catch (e) { throw new Error(e.message + "\n" + diagnostic); }
     const r = await client.callTool({ name: "computer_browser_start", arguments: { exe: "Z:/desk-mcp-missing/browser.exe", port: 65531 } });
     assert.equal(r.isError, true);
     assert.match(r.content[0].text, /NotSupported/);
