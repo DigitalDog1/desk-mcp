@@ -20,6 +20,10 @@ public class BenchForm : Form {
         BenchLog.Write(s);
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hwnd, int command);
+    private const int ShowNoActivate = 4;
+
     public BenchForm() {
         Text = "desk-mcp bench";
         ClientSize = new Size(760, 460);
@@ -69,7 +73,12 @@ public class BenchForm : Form {
         var status = new Label { Name = "status", Text = "событий: 0", AutoSize = true, Location = new Point(20, 450) };
         Controls.Add(status);
 
-        Shown += (s, e) => BenchLog.Write("SHOWN visible=" + Visible + " handle=" + Handle + " bounds=" + Bounds.ToString());
+        Shown += (s, e) => {
+            // Start-Bench launches PowerShell with WindowStyle Hidden. Explicitly
+            // show the form without activating it so UI Automation can find it.
+            ShowWindow(Handle, ShowNoActivate);
+            BenchLog.Write("SHOWN visible=" + Visible + " handle=" + Handle + " bounds=" + Bounds.ToString());
+        };
         FormClosed += (s, e) => BenchLog.Write("CLOSED");
     }
 }
