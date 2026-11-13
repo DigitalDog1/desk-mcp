@@ -340,9 +340,11 @@ if (process.env.DESK_TEST_CDP === "1") try {
 }
 
 console.log("== OCR, окна, пачки ==");
-await check("computer_ocr", { languages: true },
+const ocrLanguageResult = await check("computer_ocr", { languages: true },
   (r, t) => t.includes('"languages":') && t.includes('"default":'));
-await check("computer_ocr", { region: "300,250,1300,500", lang: "ru-RU" },
+const ocrLanguages = JSON.parse(ocrLanguageResult.content[0].text);
+const installedOcr = Array.isArray(ocrLanguages.languages) ? ocrLanguages.languages : [ocrLanguages.languages];
+await check("computer_ocr", { region: "300,250,1300,500", lang: installedOcr[0]?.tag },
   (r, t) => t.includes("lineCount"));
 await check("computer_ocr", { region: "300,250,800,300", words: false },
   (r, t) => t.includes("lineCount") && !t.includes('"words":'));
