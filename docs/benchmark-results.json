@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "at": "2026-11-13T20:05:05.214Z",
+  "at": "2026-11-13T20:10:22.540Z",
   "version": "1.5.1",
   "environment": {
     "platform": "win32",
@@ -24,7 +24,7 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 215.0277000000001,
+      "ms": 218.9351999999999,
       "textBytes": 444,
       "imageBytes": 0
     },
@@ -33,7 +33,7 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 28.920399999999972,
+      "ms": 28.39469999999983,
       "textBytes": 437,
       "imageBytes": 0
     },
@@ -42,7 +42,7 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 226.1010000000001,
+      "ms": 242.73210000000017,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -51,7 +51,7 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 152.6478000000002,
+      "ms": 154.0305000000003,
       "textBytes": 22246,
       "imageBytes": 0
     },
@@ -60,7 +60,7 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 42.289000000000215,
+      "ms": 47.346700000000055,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -71,7 +71,7 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 110.32629999999972,
+      "ms": 115.0036,
       "textBytes": 444,
       "imageBytes": 0
     },
@@ -80,7 +80,7 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 1.4529999999995198,
+      "ms": 1.3504000000002634,
       "textBytes": 437,
       "imageBytes": 0
     },
@@ -89,7 +89,7 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 232.1931999999997,
+      "ms": 231.27899999999954,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -98,7 +98,7 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 145.59089999999924,
+      "ms": 132.49389999999948,
       "textBytes": 22246,
       "imageBytes": 0
     },
@@ -107,7 +107,7 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 12.973700000000463,
+      "ms": 16.584599999999227,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -118,7 +118,7 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 117.4336000000003,
+      "ms": 105.85919999999987,
       "textBytes": 444,
       "imageBytes": 0
     },
@@ -127,7 +127,7 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 1.1177999999999884,
+      "ms": 1.1550999999999476,
       "textBytes": 437,
       "imageBytes": 0
     },
@@ -136,7 +136,7 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 177.71439999999984,
+      "ms": 170.54989999999998,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -145,7 +145,7 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 159.0568999999996,
+      "ms": 161.73570000000018,
       "textBytes": 22246,
       "imageBytes": 0
     },
@@ -154,7 +154,7 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 15.313899999999194,
+      "ms": 12.784099999999853,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -165,7 +165,7 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 0.9893999999994776,
+      "ms": 0.8953999999994267,
       "textBytes": 437,
       "imageBytes": 0
     },
@@ -174,7 +174,7 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 235.3716999999997,
+      "ms": 242.40940000000046,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -183,7 +183,7 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 149.63619999999992,
+      "ms": 145.02800000000025,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -192,7 +192,7 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 12.316600000000108,
+      "ms": 15.772500000000036,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -203,7 +203,7 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 105.73459999999977,
+      "ms": 108.20830000000024,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -212,7 +212,7 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 199.4865000000009,
+      "ms": 201.44930000000022,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -221,7 +221,7 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 146.69700000000012,
+      "ms": 144.66460000000006,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -230,7 +230,7 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 18.098400000000765,
+      "ms": 14.504900000001726,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -241,7 +241,7 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 110.26430000000073,
+      "ms": 109.90359999999964,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -250,7 +250,7 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 1.181800000000294,
+      "ms": 1.179100000001199,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -259,7 +259,7 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 144.67640000000029,
+      "ms": 145.48480000000018,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -268,7 +268,7 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 18.914200000001074,
+      "ms": 16.178100000000995,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -279,7 +279,7 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 127.77880000000005,
+      "ms": 143.04559999999947,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -288,7 +288,7 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 1.0709999999999127,
+      "ms": 1.176100000000588,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -297,7 +297,7 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 188.1270999999997,
+      "ms": 206.33620000000155,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -306,7 +306,7 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 18.24330000000009,
+      "ms": 18.136899999999514,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -317,7 +317,7 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 136.73350000000028,
+      "ms": 136.75710000000072,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -326,7 +326,7 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 1.0023000000001048,
+      "ms": 1.1286000000000058,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -335,7 +335,7 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 193.28119999999944,
+      "ms": 215.59089999999924,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -344,7 +344,7 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 148.70739999999932,
+      "ms": 144.92519999999968,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -353,7 +353,7 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 114.36809999999969,
+      "ms": 106.40179999999964,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -362,7 +362,7 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 1.022899999999936,
+      "ms": 1.1154000000005908,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -371,7 +371,7 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 200.45570000000043,
+      "ms": 202.16840000000047,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -380,7 +380,7 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 148.33139999999912,
+      "ms": 155.72530000000006,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -389,7 +389,7 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 12.68159999999989,
+      "ms": 14.777899999999136,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -400,7 +400,7 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 0.9398999999993976,
+      "ms": 0.987699999999677,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -409,7 +409,7 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 179.83389999999963,
+      "ms": 184.03190000000177,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -418,7 +418,7 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 137.5153999999984,
+      "ms": 150.77520000000004,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -427,7 +427,7 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 13.471099999998842,
+      "ms": 17.117099999999482,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -438,7 +438,7 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 121.03350000000137,
+      "ms": 122.32370000000083,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -447,7 +447,7 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 185.08850000000166,
+      "ms": 188.73649999999907,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -456,7 +456,7 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 146.22320000000036,
+      "ms": 152.39960000000065,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -465,7 +465,7 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 18.388100000000122,
+      "ms": 14.159499999997934,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -476,7 +476,7 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 108.81490000000122,
+      "ms": 106.67190000000119,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -485,7 +485,7 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 1.1675999999970372,
+      "ms": 1.0697999999974854,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -494,7 +494,7 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 141.2605999999978,
+      "ms": 142.40799999999945,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -503,7 +503,7 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 13.579399999998714,
+      "ms": 17.00879999999961,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -514,7 +514,7 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 129.44959999999992,
+      "ms": 128.62580000000162,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -523,7 +523,7 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 1.3377999999975145,
+      "ms": 1.1906999999991967,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -532,7 +532,7 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 196.1908000000003,
+      "ms": 194.6887999999999,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -541,7 +541,7 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 17.75630000000092,
+      "ms": 17.115099999999074,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -552,7 +552,7 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 136.04260000000068,
+      "ms": 134.67829999999958,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -561,7 +561,7 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 1.1932999999989988,
+      "ms": 1.1107999999985623,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -570,7 +570,7 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 209.25670000000173,
+      "ms": 192.1105000000025,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -579,7 +579,7 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 156.15139999999883,
+      "ms": 162.50049999999828,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -588,7 +588,7 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 109.48830000000089,
+      "ms": 112.99500000000262,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -597,7 +597,7 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 1.058999999997468,
+      "ms": 1.1689000000005763,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -606,7 +606,7 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 174.77599999999802,
+      "ms": 204.7257000000027,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -615,7 +615,7 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 139.69700000000012,
+      "ms": 145.90810000000056,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -624,7 +624,7 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 14.791399999998248,
+      "ms": 14.379899999999907,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -635,7 +635,7 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 0.9097000000001572,
+      "ms": 0.8835999999973865,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -644,7 +644,7 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 224.51320000000123,
+      "ms": 213.66649999999936,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -653,7 +653,7 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 147.55739999999787,
+      "ms": 142.09319999999934,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -662,7 +662,7 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 13.74120000000039,
+      "ms": 12.751000000000204,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -673,7 +673,7 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 104.79669999999896,
+      "ms": 106.32770000000164,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -682,7 +682,7 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 199.41719999999987,
+      "ms": 202.67700000000332,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -691,7 +691,7 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 147.6900999999998,
+      "ms": 144.3914999999979,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -700,7 +700,7 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 15.868099999999686,
+      "ms": 17.65190000000075,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -711,7 +711,7 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 107.55189999999857,
+      "ms": 109.2528999999995,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -720,7 +720,7 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 1.1512999999977183,
+      "ms": 1.128499999998894,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -729,7 +729,7 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 146.04729999999836,
+      "ms": 139.94490000000224,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -738,7 +738,7 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 13.295399999999063,
+      "ms": 14.613199999999779,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -749,7 +749,7 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 133.95650000000023,
+      "ms": 137.33209999999963,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -758,7 +758,7 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 1.1032000000013795,
+      "ms": 1.225399999999354,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -767,7 +767,7 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 200.70660000000134,
+      "ms": 211.88869999999952,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -776,7 +776,7 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 15.7316000000028,
+      "ms": 15.349900000001071,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -787,7 +787,7 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 104.2576999999983,
+      "ms": 117.08099999999831,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -796,7 +796,7 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 1.084100000000035,
+      "ms": 1.165499999999156,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -805,7 +805,7 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 185.60680000000139,
+      "ms": 190.1348999999973,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -814,7 +814,7 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 145.70650000000023,
+      "ms": 154.45570000000225,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -823,7 +823,7 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 139.4216000000015,
+      "ms": 142.8775999999998,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -832,7 +832,7 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 1.1405000000013388,
+      "ms": 1.1286000000036438,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -841,7 +841,7 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 205.087099999997,
+      "ms": 191.63229999999749,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -850,7 +850,7 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 149.4789000000019,
+      "ms": 145.36650000000373,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -859,7 +859,7 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 16.51640000000043,
+      "ms": 14.145700000000943,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -870,7 +870,7 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 1.0270999999993364,
+      "ms": 0.8813000000009197,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -879,7 +879,7 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 226.60280000000057,
+      "ms": 220.2396000000008,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -888,7 +888,7 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 141.7297000000035,
+      "ms": 145.95420000000013,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -897,7 +897,7 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 16.50850000000355,
+      "ms": 13.485099999998056,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -908,7 +908,7 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 104.66440000000148,
+      "ms": 108.63200000000506,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -917,7 +917,7 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 193.54329999999754,
+      "ms": 209.69599999999627,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -926,7 +926,7 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 144.0158999999985,
+      "ms": 143.00910000000295,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -935,7 +935,7 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 14.767399999996996,
+      "ms": 14.808599999996659,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -946,7 +946,7 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 107.61149999999907,
+      "ms": 116.4030000000057,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -955,7 +955,7 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 1.1241999999983818,
+      "ms": 1.0942999999970198,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -964,7 +964,7 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 139.51670000000013,
+      "ms": 159.943299999999,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -973,7 +973,7 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 18.371899999998277,
+      "ms": 15.852700000003097,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -984,7 +984,7 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 122.56590000000142,
+      "ms": 105.47810000000027,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -993,7 +993,7 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 1.218300000000454,
+      "ms": 1.2321999999985565,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -1002,7 +1002,7 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 208.3512000000046,
+      "ms": 198.5074999999997,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -1011,7 +1011,7 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 16.97609999999986,
+      "ms": 14.722300000001269,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -1022,7 +1022,7 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 105.35940000000119,
+      "ms": 131.6501999999964,
       "textBytes": 445,
       "imageBytes": 0
     },
@@ -1031,7 +1031,7 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 1.1707000000023982,
+      "ms": 1.1357999999963795,
       "textBytes": 438,
       "imageBytes": 0
     },
@@ -1040,7 +1040,7 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 175.84090000000288,
+      "ms": 186.98040000000037,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -1049,7 +1049,7 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 163.3747000000003,
+      "ms": 139.10239999999612,
       "textBytes": 22247,
       "imageBytes": 0
     },
@@ -1058,7 +1058,7 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 349.06819999999425,
+      "ms": 376.14280000000144,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1067,7 +1067,7 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 364.87980000000243,
+      "ms": 335.3248999999996,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1076,7 +1076,7 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 345.34560000000056,
+      "ms": 355.13200000000506,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1085,7 +1085,7 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 342.0132999999987,
+      "ms": 330.05019999999786,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1094,7 +1094,7 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 359.14800000000105,
+      "ms": 342.6979999999967,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1103,7 +1103,7 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 340.25420000000304,
+      "ms": 359.14140000000043,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1112,7 +1112,7 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 349.9163999999946,
+      "ms": 343.6055000000051,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1121,7 +1121,7 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 380.2502999999997,
+      "ms": 369.6339000000007,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1130,7 +1130,7 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 346.4199000000008,
+      "ms": 361.70350000000326,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1139,7 +1139,7 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 341.4765999999945,
+      "ms": 326.74619999999413,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1148,7 +1148,7 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 360.5196999999971,
+      "ms": 359.2272000000012,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1157,7 +1157,7 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 344.15819999999803,
+      "ms": 325.12460000000283,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1166,7 +1166,7 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 357.5688000000009,
+      "ms": 359.4412999999986,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1175,7 +1175,7 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 346.366399999999,
+      "ms": 359.877800000002,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1184,7 +1184,7 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 331.9976999999999,
+      "ms": 325.61470000000554,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1193,7 +1193,7 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 357.94460000000254,
+      "ms": 353.19200000000274,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1202,7 +1202,7 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 344.6270000000004,
+      "ms": 353.3958999999959,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1211,7 +1211,7 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 352.0037999999986,
+      "ms": 342.12740000000485,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1220,7 +1220,7 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 364.6454999999987,
+      "ms": 374.9148999999961,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1229,7 +1229,7 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 325.4377999999997,
+      "ms": 324.86409999999887,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1238,7 +1238,7 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 346.931700000001,
+      "ms": 341.72329999999783,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1247,7 +1247,7 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 376.1978999999992,
+      "ms": 337.454899999997,
       "calls": 3,
       "selected": "simsunb.ttf"
     }
@@ -1257,7 +1257,7 @@
     "server.mjs": "d511196e024b1ae68fb93a88edeb8c4af9792a84d966d43cf700b325473e1087",
     "worker.ps1": "35d1d55f93f28f99f79c0a766ebb3ef41bcadadfcbc9c227e2e13b45b949b9b5",
     "uia-native.cs": "5ea84cd9e4b58ff81c628c6b8d3e77554cd3ffb2a6e8e8dcf562f9a75b301097",
-    "lib/worker.mjs": "70a3c1afef8c22acc6e5af0bd04c53b3071141c6b8c08527ca16301c10759c89",
+    "lib/worker.mjs": "c92be74db34205edf472cbcf0bc12142e77373ce7310c5f856159a0138a61240",
     "lib/cdp.mjs": "8a5be88a19d34f84bc000e8151ff17939283d486f063ebeadbc4c1838b9a361e",
     "lib/batch.mjs": "3195cd32f91da7ac171f844f9b8acf208b51db2b8b3aedde15b62276495e289b",
     "lib/stats.mjs": "186fb7d3e201f7b55de628ef9343eea5181fec9f6391b8237afd94ae228d0a6a",
@@ -1265,7 +1265,7 @@
     "benchmark.mjs": "30401526e22812fcb6988e104486dbf3510262831d421fd44aae394ec9a8f725",
     "examples/font-catalog.ps1": "59afba62f6f054312ca2a9da1d37111b75a3bc3092b3e491792f30910a08d668"
   },
-  "startupMs": 776.9630999999999,
+  "startupMs": 792.3117,
   "nativeUia": true,
   "summary": {
     "find_uncached": {
@@ -1273,10 +1273,10 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 104.2576999999983,
-        "p50": 110.26430000000073,
-        "p95": 136.73350000000028,
-        "max": 139.4216000000015
+        "min": 105.47810000000027,
+        "p50": 112.99500000000262,
+        "p95": 142.8775999999998,
+        "max": 143.04559999999947
       },
       "textBytes": {
         "n": 20,
@@ -1292,10 +1292,10 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 0.9097000000001572,
-        "p50": 1.1032000000013795,
-        "p95": 1.218300000000454,
-        "max": 1.3377999999975145
+        "min": 0.8813000000009197,
+        "p50": 1.1286000000000058,
+        "p95": 1.225399999999354,
+        "max": 1.2321999999985565
       },
       "textBytes": {
         "n": 20,
@@ -1311,10 +1311,10 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 174.77599999999802,
-        "p50": 196.1908000000003,
-        "p95": 226.60280000000057,
-        "max": 235.3716999999997
+        "min": 170.54989999999998,
+        "p50": 201.44930000000022,
+        "p95": 220.2396000000008,
+        "max": 242.40940000000046
       },
       "textBytes": {
         "n": 20,
@@ -1330,10 +1330,10 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 137.5153999999984,
-        "p50": 146.22320000000036,
-        "p95": 159.0568999999996,
-        "max": 163.3747000000003
+        "min": 139.10239999999612,
+        "p50": 145.36650000000373,
+        "p95": 161.73570000000018,
+        "max": 162.50049999999828
       },
       "textBytes": {
         "n": 20,
@@ -1349,10 +1349,10 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 12.316600000000108,
-        "p50": 15.7316000000028,
-        "p95": 18.388100000000122,
-        "max": 18.914200000001074
+        "min": 12.751000000000204,
+        "p50": 14.777899999999136,
+        "p95": 17.65190000000075,
+        "max": 18.136899999999514
       },
       "textBytes": {
         "n": 20,
@@ -1374,10 +1374,10 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 325.4377999999997,
-        "p50": 346.4199000000008,
-        "p95": 376.1978999999992,
-        "max": 380.2502999999997
+        "min": 324.86409999999887,
+        "p50": 343.6055000000051,
+        "p95": 369.6339000000007,
+        "max": 374.9148999999961
       },
       "textBytes": null,
       "imageBytes": null
