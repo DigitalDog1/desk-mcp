@@ -58,3 +58,7 @@ _d_*/
 *.tgz
 bench-out.txt
 bench-last.json
+
+!check-docs.mjs
+!check-package.mjs
+/benchmark-results.json

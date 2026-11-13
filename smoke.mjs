@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const t = new StdioClientTransport({ command: "node", args: [path.join(__dirname, "server.mjs")], stderr: "pipe" });
+const t = new StdioClientTransport({ command: process.execPath, args: [path.join(__dirname, "server.mjs")], stderr: "pipe" });
 const c = new Client({ name: "smoke", version: "1.0.0" });
 await c.connect(t);
 
@@ -57,7 +57,7 @@ let target = null;
 if (winList) {
   try {
     const all = JSON.parse(winList.content[0].text).windows || [];
-    target = all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200 && !/Steam|1C|1С/i.test(w.title));
+    target = all.find((w) => w.visible && /Parcel Tracker/.test(w.title)) ?? all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200 && !/Steam|1C|1С/i.test(w.title));
   } catch { /* список не разобрался — просто пропустим привязанные проверки */ }
 }
 const keyOf = (t) => (t ? t.title.slice(0, 24) : "");
@@ -72,7 +72,7 @@ const retarget = async () => {
   try {
     const r = await c.callTool({ name: "computer_windows", arguments: {} });
     const all = JSON.parse(r.content[0].text).windows || [];
-    const hit = all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200 && !/Steam|1C|1С/i.test(w.title));
+    const hit = all.find((w) => w.visible && /Parcel Tracker/.test(w.title)) ?? all.find((w) => w.visible && w.title && w.rect.w > 300 && w.rect.h > 200 && !/Steam|1C|1С/i.test(w.title));
     if (hit) { tKey = keyOf(hit); return true; }
   } catch { /* перевыбор не удался */ }
   return false;
@@ -314,7 +314,7 @@ await check("computer_wait", { ms: 50 }, (r, t) => t.includes("waitedMs"));
 // CDP зависит от живого браузера, поэтому блок необязательный: если порт
 // не поднялся — это не провал основного канала, а пропуск внешней части.
 console.log("== Chromium через CDP ==");
-try {
+if (process.env.DESK_TEST_CDP === "1") try {
   await check("computer_browser_start", { browser: "edge", url: "https://example.com" },
     (r, t) => t.includes('"ok": true'));
   await new Promise((r) => setTimeout(r, 2500));
@@ -340,9 +340,11 @@ try {
 }
 
 console.log("== OCR, окна, пачки ==");
-await check("computer_ocr", { languages: true },
+const ocrLanguageResult = await check("computer_ocr", { languages: true },
   (r, t) => t.includes('"languages":') && t.includes('"default":'));
-await check("computer_ocr", { region: "300,250,1300,500", lang: "ru-RU" },
+const ocrLanguages = JSON.parse(ocrLanguageResult.content[0].text);
+const installedOcr = Array.isArray(ocrLanguages.languages) ? ocrLanguages.languages : [ocrLanguages.languages];
+await check("computer_ocr", { region: "300,250,1300,500", lang: installedOcr[0]?.tag },
   (r, t) => t.includes("lineCount"));
 await check("computer_ocr", { region: "300,250,800,300", words: false },
   (r, t) => t.includes("lineCount") && !t.includes('"words":'));
@@ -375,7 +377,7 @@ console.log(shown
 
 
 console.log("== буфер ==");
-await check("computer_clipboard_set", { text: "проверка" });
+// Clipboard writes are covered on a dry-run server, preserving the user clipboard.
 await check("computer_clipboard_get", {}, (r, t) => t.includes('"length"'));
 
 console.log("== batch: MCP-имена в шагах, stopOnError ==");
@@ -460,7 +462,7 @@ await check("computer_read_screen",
 {
   const tb = Date.now();
   const t2 = new StdioClientTransport({
-    command: "node",
+    command: process.execPath,
     args: [path.join(__dirname, "server.mjs")],
     stderr: "pipe",
     env: { ...process.env, DESK_UI_TIMEOUT_MS: "1", DESK_UI_COOLDOWN_MS: "60000" },
@@ -504,7 +506,7 @@ await check("computer_read_screen",
 console.log("== отключение инструментов (DESK_DISABLE_TOOLS) ==");
 {
   const t3 = new StdioClientTransport({
-    command: "node",
+    command: process.execPath,
     args: [path.join(__dirname, "server.mjs")],
     stderr: "pipe",
     env: { ...process.env, DESK_DISABLE_TOOLS: "computer_click,computer_*_text,computer_read_table" },
@@ -636,7 +638,7 @@ console.log("== пачка подставляет значение из пред
     const batch = await call("computer_batch", {
       steps: [
         { tool: "computer_find", args: { hwnd: withHwnd.hwnd, limit: 1 } },
-        { tool: "computer_clipboard_set", args: { text: "${steps.0.elements.0.elementId}" } },
+        { tool: "computer_wait", args: { ms: "${steps.0.count}" } },
       ],
     });
     const txt = batch.content?.[0]?.text ?? "";
@@ -724,18 +726,15 @@ console.log("== частичные ответы: truncatedReason и searchIncomp
   }
 }
 
-console.log("== режимы ввода inputMode ==");
-{
-  const tp = await call("computer_type", { text: "desk-mcp-smoke", inputMode: "paste" });
-  const tpParsed = JSON.parse(tp.content?.[0]?.text ?? "{}");
-  const okTp = tpParsed.ok === true && tpParsed.mode === "paste";
-  if (okTp) {
-    pass++;
-    console.log("  ОК   computer_type отработал в режиме inputMode=paste");
-  } else {
-    fail++;
-    console.log(`  СБОЙ computer_type paste: ${tp.content?.[0]?.text?.slice(0, 100)}`);
-  }
+console.log("== режимы ввода проверены на отдельном dry-run сервере ==");
+
+if (demo) {
+  const unique = await call("computer_find", { title: demo, nameRegex: ".+", limit: 1, requireUnique: true });
+  if (unique.isError && unique.content[0].text.includes("AmbiguousMatch")) { pass++; console.log("  ОК   requireUnique не обходит дубликаты через limit:1"); }
+  else { fail++; console.log("  СБОЙ requireUnique с limit:1"); }
+  const invalid = await call("computer_find", { title: demo, nameRegex: "[" });
+  if (invalid.isError && invalid.content[0].text.includes("InvalidArgument")) { pass++; console.log("  ОК   некорректная регулярка отклонена"); }
+  else { fail++; console.log("  СБОЙ некорректная регулярка"); }
 }
 
 console.log("== два README описывают одно и то же ==");
@@ -756,3 +755,4 @@ console.log("== два README описывают одно и то же ==");
 
 console.log(`\nИТОГ: ${pass} ок, ${fail} провалов, ${skipped} пропущено`);
 await c.close();
+process.exitCode = fail > 0 ? 1 : 0;

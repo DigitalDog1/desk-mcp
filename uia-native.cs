@@ -970,6 +970,7 @@ public static class UiaNative
     // Статусы: ok / notfound / disabled / noPattern / error / unknownAction.
     // PowerShell по ним решает, что делать дальше: отказаться, отдать
     // результат или откатиться на пиксельный клик.
+    private static readonly string ElementSession = Guid.NewGuid().ToString("N");
     private static int _elementSeq = 0;
     private static readonly Dictionary<string, AutomationElement> _elementMap =
         new Dictionary<string, AutomationElement>();
@@ -982,7 +983,7 @@ public static class UiaNative
         lock (_elementMap)
         {
             _elementSeq++;
-            string id = "el_" + _elementSeq;
+            string id = "el_" + ElementSession + "_" + _elementSeq;
             _elementMap[id] = el;
             _elementRing.Add(id);
             if (_elementRing.Count > MaxCachedElements)
@@ -1527,7 +1528,7 @@ public static class UiaNative
             string pat = nameLike.Substring(1, nameLike.Length - 2);
             try
             {
-                rx = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                rx = new System.Text.RegularExpressions.Regex(pat, System.Text.RegularExpressions.RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(250));
             }
             catch (Exception)
             {
