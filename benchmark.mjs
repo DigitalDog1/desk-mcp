@@ -44,7 +44,8 @@ async function call(name, args = {}) {
   const bytes = Buffer.byteLength(text);
   return { ms, data, textBytes: bytes, imageBytes: image ? Buffer.from(image.data,"base64").length : 0, image };
 }
-report.sourceSha256 = Object.fromEntries(await Promise.all(["server.mjs", "worker.ps1", "uia-native.cs", "lib/worker.mjs", "lib/cdp.mjs", "lib/batch.mjs", "lib/stats.mjs", "package-lock.json", "benchmark.mjs", "examples/font-catalog.ps1"].map(async (name) => [name, createHash("sha256").update(await fs.readFile(path.join(root,name))).digest("hex")])));
+report.sourceHashFormat = "UTF-8 text with LF line endings (BOM preserved)";
+report.sourceSha256 = Object.fromEntries(await Promise.all(["server.mjs", "worker.ps1", "uia-native.cs", "lib/worker.mjs", "lib/cdp.mjs", "lib/batch.mjs", "lib/stats.mjs", "package-lock.json", "benchmark.mjs", "examples/font-catalog.ps1"].map(async (name) => [name, createHash("sha256").update((await fs.readFile(path.join(root,name), "utf8")).replace(/\r\n/g, "\n")).digest("hex")])));
 let hwnd;
 try {
   const start = performance.now();

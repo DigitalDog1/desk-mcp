@@ -39,18 +39,18 @@ Historical one-off agent observations remain in benchmark-tasks.md for context. 
 
 ## Recorded run / Результат прогона
 
-2026-11-13 · Windows 10.0.19045 · 12th Gen Intel(R) Core(TM) i5-12400F · Node v24.14.0 · 255 TTF files. Startup: 789.8 ms.
+2026-11-13 · Windows 10.0.19045 · 12th Gen Intel(R) Core(TM) i5-12400F · Node v24.14.0 · 255 TTF files. Startup: 777.0 ms.
 
 | Case | Success | p50, ms | p95, ms | Text bytes, p50 | PNG bytes, p50 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| find_uncached | 20/20 | 112.1 | 138.6 | 445 | — |
-| find_cached | 20/20 | 1.0 | 1.3 | 438 | — |
-| tree_filtered | 20/20 | 204.0 | 235.0 | 85419 | — |
-| table | 20/20 | 145.3 | 154.9 | 22247 | — |
-| screenshot | 20/20 | 14.7 | 17.1 | 86 | 32302 |
-| task_select_largest | 20/20 | 347.3 | 372.5 | — | — |
+| find_uncached | 20/20 | 110.3 | 136.7 | 445 | — |
+| find_cached | 20/20 | 1.1 | 1.2 | 438 | — |
+| tree_filtered | 20/20 | 196.2 | 226.6 | 85419 | — |
+| table | 20/20 | 146.2 | 159.1 | 22247 | — |
+| screenshot | 20/20 | 15.7 | 18.4 | 86 | 32302 |
+| task_select_largest | 20/20 | 346.4 | 376.2 | — | — |
 
-[Raw samples and source hashes / Сырые измерения и хеши исходников](benchmark-results.json).
+[Raw samples and source hashes / Сырые измерения и хеши исходников](benchmark-results.json). Hashes normalize text to LF; the worker BOM is preserved.
 
 The full task succeeded in all 20 measured runs. The screenshot row measures capture only, not finding the largest file from an image. The filtered tree was larger and slower than the table; cached find is reported separately. These results describe this fixture on this machine, not all Windows apps.
 

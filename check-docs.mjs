@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 const root = path.dirname(fileURLToPath(import.meta.url));
-const read = (name) => fs.readFileSync(path.join(root, name), "utf8");
+const read = (name) => fs.readFileSync(path.join(root, name), "utf8").replace(/\r\n/g, "\n");
 const en = read("README.md"), ru = read("README.ru.md"), src = read("server.mjs");
 const unique = (text, re) => [...new Set(text.match(re) || [])].sort();
 const registered = [...src.matchAll(/reg\(\s*"(computer_[a-z_]+)"/g)].map((m) => m[1]).sort();
