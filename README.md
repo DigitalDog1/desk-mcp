@@ -77,6 +77,7 @@ The demo changes only its Parcel Tracker window and uses the clipboard. The reco
 - Use `hwnd` from `computer_windows` when titles change. Get a fresh handle after a window closes.
 - Find a control by `id` (AutomationId), `name`, `type` or `nameRegex`. `requireUnique: true` refuses ambiguous or incomplete searches.
 - Pass its `elementId` to `computer_invoke`, `computer_set_value` or `computer_select`. References expire when the worker restarts or the element disappears.
+- Mutating control tools require an `elementId`, or a window (`hwnd`/`title`) plus a control selector.
 - Verify the resulting value or state. An input event being sent does not establish success.
 
 For example, pass this to `computer_batch`:
@@ -91,11 +92,11 @@ For example, pass this to `computer_batch`:
 }
 ```
 
-Batches support up to 50 worker-tool steps, validate each step, and stop on errors unless `stopOnError: false` is set. Exact references preserve their value's type. Inspect `allOk` and each step's `code`; earlier actions are not rolled back. Browser tools and nested batches are not supported in a batch.
+Batches support up to 50 worker-tool steps, validate each step, and stop on errors unless `stopOnError: false` is set. Exact references preserve their value's type. Inspect `allOk` and each step's `code`; earlier actions are not rolled back. The default total deadline is 45 seconds; set `timeoutMs` (100–120000 ms) below your client’s timeout. Deadline expiry or client cancellation stops remaining steps, even with `stopOnError: false`. Browser tools and nested batches are not supported in a batch.
 
 For smaller trees, use `maxDepth: 4, interactiveOnly: true, compact: true`. For repeated reads, use `mode: auto` and pass the last `token` as `since` with the same options. A stale baseline or a diff larger than the full view returns the full view. Check `truncated` and `searchIncomplete` before concluding that something is absent.
 
-`computer_set_value` defaults to ValuePattern without focus. Use `inputMode: type` or `paste` for forms needing keyboard events. `computer_type` always types into the **currently focused** control. Paste uses the clipboard.
+`computer_set_value` defaults to ValuePattern without focus. Modes `type` and `paste` activate the addressed window, check field focus and verify the resulting value through ValuePattern. A mismatch returns `InputNotVerified`; inspect state before retrying. `computer_type` sends input to the **currently focused** control and returns `verified: false`. Paste uses the clipboard.
 
 ## The same window with the cursor
 
@@ -132,7 +133,7 @@ Set these in the server entry's `env` object:
 | `DESK_DRY_RUN` | off | `1` returns plans for mutating worker tools and browser start/click/eval. |
 | `DESK_DISABLE_TOOLS` | empty | Comma-separated MCP tool names; `*` wildcards supported. Also enforced for batch aliases. |
 | `DESK_ALLOW_TITLES` | empty | Pipe-separated substrings matched against supplied worker window titles. |
-| `DESK_AUDIT` / `DESK_AUDIT_PATH` | off / `%TEMP%/desk-mcp-audit.log` | Worker text log, not JSONL. Does not cover CDP. The parent directory must exist. |
+| `DESK_AUDIT` / `DESK_AUDIT_PATH` | off / `%TEMP%/desk-mcp-audit.log` | Worker text log, not JSONL. Does not cover CDP. The parent directory must exist; an unusable path fails startup with `AuditUnavailable`. |
 | `DESK_UI_TIMEOUT_MS` | `8000` | Server UIA deadline, including startup. |
 | `DESK_UI_COOLDOWN_MS` | `90000` | Cooldown for the same tool/target after a timeout. |
 | `DESK_UIA_BUDGET_MS` | `6000` | Native STA operation budget. |
@@ -141,6 +142,7 @@ Set these in the server entry's `env` object:
 
 ## Limitations and troubleshooting
 
+- `SecurityBlocked` means AMSI/antivirus blocked the PowerShell worker. Inspect Windows Protection History and report a suspected false positive; changing input settings will not fix a blocked startup.
 - Run in an interactive Windows session. Services, locked sessions, protected windows and exclusive fullscreen games can block input or capture.
 - After a UIA timeout, use screenshot/OCR or another target during cooldown. A worker restart rejects other pending calls too; re-read state before retrying an action that may already have reached the app.
 - If a pixel click is ignored, try `hoverFirst: true`. Match `scale` to the screenshot; use `nudge` or drag on a canvas.
@@ -158,14 +160,17 @@ See [method and reproducible results](docs/benchmarks.md). Reading latency, resp
 npm ci
 npm run check
 npm run test:unit
+npm run test:hardening
 npm run check:docs
 npm test
 npm pack --dry-run
 ```
 
+The hardening suite opens disposable windows, moves the cursor, uses the clipboard and deliberately hangs its own fixture. Run it on an unlocked desktop without interacting during the run. It restores clipboard text, not other clipboard formats.
+
 The Windows smoke test reads live windows and exercises Parcel Tracker if open. It does not type into an arbitrary active window. Selftest briefly presses Shift; browser launching is opt-in with `DESK_TEST_CDP=1`. Keep `worker.ps1` in UTF-8 **with BOM** and the UIA helper compatible with C# 5.
 
-[Contributing](CONTRIBUTING.md) · [Architecture](AGENTS.md) · [Changelog](CHANGELOG.md) · [Publishing](docs/PUBLISHING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+[Contributing](CONTRIBUTING.md) · [Architecture](AGENTS.md) · [Changelog](CHANGELOG.md) · [Publishing](docs/PUBLISHING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [Hard-test review](docs/hardening-review.md)
 
 ## License
 

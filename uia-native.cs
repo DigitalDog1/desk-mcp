@@ -1003,7 +1003,7 @@ public static class UiaNative
         {
             bool incomplete;
             List<object[]> hits = SearchCore("", hwnd, nameLike, typeName, automationId, maxDepth, limit, out incomplete);
-            if (hits.Count == 0) return "{\"status\":\"notfound\"}";
+            if (hits.Count == 0) return incomplete ? "{\"status\":\"incomplete\",\"searchIncomplete\":true}" : "{\"status\":\"notfound\"}";
 
             if (action == "find")
             {
@@ -1073,6 +1073,18 @@ public static class UiaNative
         bool enabled;
         try { enabled = el.Current.IsEnabled; } catch (Exception) { enabled = false; }
         if (!enabled) return "{\"status\":\"disabled\",\"element\":" + info + "}";
+
+        if (action == "describe") return "{\"status\":\"ok\",\"element\":" + info + "}";
+        if (action == "check_focus") {
+            bool focused = Automation.Compare(el, AutomationElement.FocusedElement);
+            return "{\"status\":\"ok\",\"focused\":" + (focused ? "true" : "false") + ",\"element\":" + info + "}";
+        }
+        if (action == "verify_value") {
+            ValuePattern vp = el.GetCurrentPattern(ValuePattern.Pattern) as ValuePattern;
+            if (vp == null) return "{\"status\":\"noPattern\"}";
+            bool matches = (vp.Current.Value ?? "").Replace("\r\n", "\n") == (value ?? "").Replace("\r\n", "\n");
+            return "{\"status\":\"ok\",\"matches\":" + (matches ? "true" : "false") + ",\"element\":" + ElementInfoJson(el, ct, elementId) + "}";
+        }
 
         if (action == "invoke")
         {
@@ -1313,8 +1325,9 @@ public static class UiaNative
                                    string automationId, int maxDepth,
                                    int maxRows, int maxColumns, bool headers)
     {
-        List<object[]> hits = SearchCore("", hwnd, nameLike, typeName, automationId, maxDepth, 1);
-        if (hits.Count == 0) return "{\"status\":\"notfound\"}";
+        bool incomplete;
+        List<object[]> hits = SearchCore("", hwnd, nameLike, typeName, automationId, maxDepth, 1, out incomplete);
+        if (hits.Count == 0) return incomplete ? "{\"status\":\"incomplete\"}" : "{\"status\":\"notfound\"}";
 
         AutomationElement el = (AutomationElement)hits[0][0];
         string ct = (string)hits[0][1];
@@ -1554,62 +1567,51 @@ public static class UiaNative
             }
 
             int scanned = 0;
-            Stack<object[]> stack = new Stack<object[]>();
-            stack.Push(new object[] { w, 0 });
-
-            while (stack.Count > 0 && hits.Count < limit)
-            {
-                object[] top = stack.Pop();
+            Stopwatch elapsed = Stopwatch.StartNew();
+            Queue<object[]>[] levels = new Queue<object[]>[maxDepth + 1];
+            for (int d = 0; d <= maxDepth; d++) levels[d] = new Queue<object[]>();
+            levels[0].Enqueue(new object[] { w, false });
+            while (hits.Count < limit) {
+                int depth = 0;
+                while (depth <= maxDepth && levels[depth].Count == 0) depth++;
+                if (depth > maxDepth) break;
+                if (++scanned > ScanBudget || elapsed.ElapsedMilliseconds > 2500) { incomplete = true; break; }
+                object[] top = levels[depth].Dequeue();
                 AutomationElement el = (AutomationElement)top[0];
-                int depth = (int)top[1];
-
-                if (depth > maxDepth) continue;
-                scanned++;
-                if (scanned > ScanBudget)
-                {
-                    incomplete = true;
-                    break;
-                }
-
-                try
-                {
+                try {
+                    TreeWalker walker = Walker();
+                    // Visit shallow controls before descending into large lists.
+                    if ((bool)top[1]) {
+                        AutomationElement sibling = walker.GetNextSibling(el);
+                        if (sibling != null) levels[depth].Enqueue(new object[] { sibling, true });
+                    }
                     AutomationElement.AutomationElementInformation info = el.Current;
                     string ct = TypeShort(info.ControlType);
-
-                    bool okName = true;
-                    if (rx != null)
-                    {
-                        okName = rx.IsMatch(info.Name ?? "");
-                    }
-                    else if (!IsBlank(nameLike))
-                    {
-                        okName = Contains(info.Name, nameLike);
-                    }
-
-                    bool okType = IsBlank(typeName) ||
-                                  string.Equals(ct, typeName, StringComparison.OrdinalIgnoreCase) ||
-                                  Contains(ct, typeName);
-                    bool okId = IsBlank(automationId) ||
-                                string.Equals(info.AutomationId, automationId, StringComparison.OrdinalIgnoreCase);
-
+                    bool okName = rx != null ? rx.IsMatch(info.Name ?? "") : IsBlank(nameLike) || Contains(info.Name, nameLike);
+                    bool okType = IsBlank(typeName) || string.Equals(ct, typeName, StringComparison.OrdinalIgnoreCase) || Contains(ct, typeName);
+                    bool okId = IsBlank(automationId) || string.Equals(info.AutomationId, automationId, StringComparison.OrdinalIgnoreCase);
                     if (okName && okType && okId) hits.Add(new object[] { el, ct });
-
-                    TreeWalker walker = Walker();
-                    AutomationElement ch = walker.GetFirstChild(el);
-                    while (ch != null)
-                    {
-                        stack.Push(new object[] { ch, depth + 1 });
-                        ch = walker.GetNextSibling(ch);
+                    if (hits.Count >= limit) { incomplete = true; break; }
+                    AutomationElement child = walker.GetFirstChild(el);
+                    if (child != null) {
+                        if (depth < maxDepth) levels[depth + 1].Enqueue(new object[] { child, true });
+                        else incomplete = true;
                     }
-                }
-                catch (Exception)
-                {
-                }
+                } catch (Exception) { incomplete = true; }
             }
-            if (stack.Count > 0 && hits.Count >= limit) incomplete = true;
         }
 
         return hits;
+    }
+
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flag);
+    private static long TopHwnd(AutomationElement el) {
+        for (int i = 0; el != null && i < 32; i++) {
+            int handle = el.Current.NativeWindowHandle;
+            if (handle != 0) return GetAncestor(new IntPtr(handle), 2).ToInt64();
+            el = TreeWalker.RawViewWalker.GetParent(el);
+        }
+        return 0;
     }
 
     private static string ElementInfoJson(AutomationElement el, string ct)
@@ -1627,6 +1629,7 @@ public static class UiaNative
 
         StringBuilder b = new StringBuilder(256);
         b.Append("{\"elementId\":").Append(J(elementId));
+        b.Append(",\"hwnd\":").Append(TopHwnd(el).ToString(CultureInfo.InvariantCulture));
         b.Append(",\"name\":").Append(J(Trunc(info.Name, 160)));
         b.Append(",\"type\":").Append(J(ct));
         b.Append(",\"id\":").Append(J(info.AutomationId));
@@ -1648,7 +1651,10 @@ public static class UiaNative
             try
             {
                 ValuePattern vp = el.GetCurrentPattern(ValuePattern.Pattern) as ValuePattern;
-                if (vp != null) b.Append(",\"value\":").Append(J(Trunc(vp.Current.Value, 300)));
+                if (vp != null) {
+                    b.Append(",\"value\":").Append(J(Trunc(vp.Current.Value, 300)));
+                    b.Append(",\"readOnly\":").Append(vp.Current.IsReadOnly ? "true" : "false");
+                }
             }
             catch (Exception)
             {

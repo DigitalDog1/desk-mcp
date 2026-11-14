@@ -39,16 +39,16 @@ Historical one-off agent observations remain in benchmark-tasks.md for context. 
 
 ## Recorded run / Результат прогона
 
-2026-11-13 · Windows 10.0.19045 · 12th Gen Intel(R) Core(TM) i5-12400F · Node v24.14.0 · 255 TTF files. Startup: 792.3 ms.
+2026-11-14 · desk-mcp 1.5.2 · Windows 10.0.19045 · 12th Gen Intel(R) Core(TM) i5-12400F · Node v24.14.0 · 255 TTF files. Startup: 814.0 ms.
 
 | Case | Success | p50, ms | p95, ms | Text bytes, p50 | PNG bytes, p50 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| find_uncached | 20/20 | 113.0 | 142.9 | 445 | — |
-| find_cached | 20/20 | 1.1 | 1.2 | 438 | — |
-| tree_filtered | 20/20 | 201.4 | 220.2 | 85419 | — |
-| table | 20/20 | 145.4 | 161.7 | 22247 | — |
-| screenshot | 20/20 | 14.8 | 17.7 | 86 | 32302 |
-| task_select_largest | 20/20 | 343.6 | 369.6 | — | — |
+| find_uncached | 20/20 | 109.6 | 129.9 | 468 | — |
+| find_cached | 20/20 | 1.0 | 1.2 | 461 | — |
+| tree_filtered | 20/20 | 203.7 | 222.0 | 85419 | — |
+| table | 20/20 | 108.9 | 115.4 | 22268 | — |
+| screenshot | 20/20 | 15.0 | 17.5 | 86 | 32302 |
+| task_select_largest | 20/20 | 259.0 | 291.7 | — | — |
 
 [Raw samples and source hashes / Сырые измерения и хеши исходников](benchmark-results.json). Hashes normalize text to LF; the worker BOM is preserved.
 

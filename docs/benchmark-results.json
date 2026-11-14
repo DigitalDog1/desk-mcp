@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "at": "2026-11-13T20:10:22.540Z",
-  "version": "1.5.1",
+  "at": "2026-11-14T12:41:46.818Z",
+  "version": "1.5.2",
   "environment": {
     "platform": "win32",
     "release": "10.0.19045",
@@ -24,8 +24,8 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 218.9351999999999,
-      "textBytes": 444,
+      "ms": 218.15999999999985,
+      "textBytes": 467,
       "imageBytes": 0
     },
     {
@@ -33,8 +33,8 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 28.39469999999983,
-      "textBytes": 437,
+      "ms": 5.330500000000029,
+      "textBytes": 460,
       "imageBytes": 0
     },
     {
@@ -42,7 +42,7 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 242.73210000000017,
+      "ms": 228.79549999999972,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -51,8 +51,8 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 154.0305000000003,
-      "textBytes": 22246,
+      "ms": 111.42320000000018,
+      "textBytes": 22267,
       "imageBytes": 0
     },
     {
@@ -60,7 +60,7 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 47.346700000000055,
+      "ms": 45.22950000000037,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -71,8 +71,8 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 115.0036,
-      "textBytes": 444,
+      "ms": 113.69419999999991,
+      "textBytes": 467,
       "imageBytes": 0
     },
     {
@@ -80,8 +80,8 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 1.3504000000002634,
-      "textBytes": 437,
+      "ms": 1.1755999999995765,
+      "textBytes": 460,
       "imageBytes": 0
     },
     {
@@ -89,7 +89,7 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 231.27899999999954,
+      "ms": 227.08460000000014,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -98,8 +98,8 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 132.49389999999948,
-      "textBytes": 22246,
+      "ms": 108.40920000000006,
+      "textBytes": 22267,
       "imageBytes": 0
     },
     {
@@ -107,7 +107,7 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 16.584599999999227,
+      "ms": 15.449200000000019,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -118,8 +118,8 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 105.85919999999987,
-      "textBytes": 444,
+      "ms": 105.3096999999998,
+      "textBytes": 467,
       "imageBytes": 0
     },
     {
@@ -127,8 +127,8 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 1.1550999999999476,
-      "textBytes": 437,
+      "ms": 1.0059000000001106,
+      "textBytes": 460,
       "imageBytes": 0
     },
     {
@@ -136,7 +136,7 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 170.54989999999998,
+      "ms": 203.72729999999956,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -145,8 +145,8 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 161.73570000000018,
-      "textBytes": 22246,
+      "ms": 107.6301999999996,
+      "textBytes": 22267,
       "imageBytes": 0
     },
     {
@@ -154,7 +154,7 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 12.784099999999853,
+      "ms": 16.76510000000053,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -165,8 +165,8 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 0.8953999999994267,
-      "textBytes": 437,
+      "ms": 0.8438999999998487,
+      "textBytes": 460,
       "imageBytes": 0
     },
     {
@@ -174,7 +174,7 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 242.40940000000046,
+      "ms": 190.3661000000002,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -183,8 +183,8 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 145.02800000000025,
-      "textBytes": 22247,
+      "ms": 104.98749999999927,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -192,7 +192,7 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 15.772500000000036,
+      "ms": 17.515699999999924,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -203,8 +203,8 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 108.20830000000024,
-      "textBytes": 445,
+      "ms": 106.19909999999982,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -212,7 +212,7 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 201.44930000000022,
+      "ms": 217.2484999999997,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -221,8 +221,8 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 144.66460000000006,
-      "textBytes": 22247,
+      "ms": 112.29629999999997,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -230,7 +230,7 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 14.504900000001726,
+      "ms": 16.834900000001653,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -241,8 +241,8 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 109.90359999999964,
-      "textBytes": 445,
+      "ms": 107.630799999999,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -250,8 +250,8 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 1.179100000001199,
-      "textBytes": 438,
+      "ms": 1.192800000000716,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -259,8 +259,8 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 145.48480000000018,
-      "textBytes": 22247,
+      "ms": 109.93099999999868,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -268,7 +268,7 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 16.178100000000995,
+      "ms": 17.069900000000416,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -279,8 +279,8 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 143.04559999999947,
-      "textBytes": 445,
+      "ms": 106.52009999999973,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -288,8 +288,8 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 1.176100000000588,
-      "textBytes": 438,
+      "ms": 1.0809000000008382,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -297,7 +297,7 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 206.33620000000155,
+      "ms": 221.98309999999947,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -306,7 +306,7 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 18.136899999999514,
+      "ms": 15.421599999999671,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -317,8 +317,8 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 136.75710000000072,
-      "textBytes": 445,
+      "ms": 124.54889999999978,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -326,8 +326,8 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 1.1286000000000058,
-      "textBytes": 438,
+      "ms": 1.0552999999999884,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -335,7 +335,7 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 215.59089999999924,
+      "ms": 176.60629999999946,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -344,8 +344,8 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 144.92519999999968,
-      "textBytes": 22247,
+      "ms": 110.56390000000101,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -353,8 +353,8 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 106.40179999999964,
-      "textBytes": 445,
+      "ms": 129.85449999999946,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -362,8 +362,8 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 1.1154000000005908,
-      "textBytes": 438,
+      "ms": 1.066499999998996,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -371,7 +371,7 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 202.16840000000047,
+      "ms": 213.17109999999957,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -380,8 +380,8 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 155.72530000000006,
-      "textBytes": 22247,
+      "ms": 107.69830000000002,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -389,7 +389,7 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 14.777899999999136,
+      "ms": 13.67699999999968,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -400,8 +400,8 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 0.987699999999677,
-      "textBytes": 438,
+      "ms": 0.8775000000005093,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -409,7 +409,7 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 184.03190000000177,
+      "ms": 190.80759999999827,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -418,8 +418,8 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 150.77520000000004,
-      "textBytes": 22247,
+      "ms": 115.8137999999999,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -427,7 +427,7 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 17.117099999999482,
+      "ms": 12.795799999999872,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -438,8 +438,8 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 122.32370000000083,
-      "textBytes": 445,
+      "ms": 123.90719999999783,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -447,7 +447,7 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 188.73649999999907,
+      "ms": 204.62690000000293,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -456,8 +456,8 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 152.39960000000065,
-      "textBytes": 22247,
+      "ms": 110.59630000000107,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -465,7 +465,7 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 14.159499999997934,
+      "ms": 13.807199999999284,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -476,8 +476,8 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 106.67190000000119,
-      "textBytes": 445,
+      "ms": 109.05659999999989,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -485,8 +485,8 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 1.0697999999974854,
-      "textBytes": 438,
+      "ms": 0.9379999999982829,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -494,8 +494,8 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 142.40799999999945,
-      "textBytes": 22247,
+      "ms": 104.09479999999894,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -503,7 +503,7 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 17.00879999999961,
+      "ms": 14.140400000000227,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -514,8 +514,8 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 128.62580000000162,
-      "textBytes": 445,
+      "ms": 110.78790000000299,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -523,8 +523,8 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 1.1906999999991967,
-      "textBytes": 438,
+      "ms": 1.162000000000262,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -532,7 +532,7 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 194.6887999999999,
+      "ms": 203.54089999999997,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -541,7 +541,7 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 17.115099999999074,
+      "ms": 18.360799999998562,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -552,8 +552,8 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 134.67829999999958,
-      "textBytes": 445,
+      "ms": 120.39500000000044,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -561,8 +561,8 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 1.1107999999985623,
-      "textBytes": 438,
+      "ms": 1.0709999999999127,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -570,7 +570,7 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 192.1105000000025,
+      "ms": 181.26940000000104,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -579,8 +579,8 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 162.50049999999828,
-      "textBytes": 22247,
+      "ms": 115.35150000000067,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -588,8 +588,8 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 112.99500000000262,
-      "textBytes": 445,
+      "ms": 111.23769999999786,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -597,8 +597,8 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 1.1689000000005763,
-      "textBytes": 438,
+      "ms": 0.9929000000011001,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -606,7 +606,7 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 204.7257000000027,
+      "ms": 213.3244999999988,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -615,8 +615,8 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 145.90810000000056,
-      "textBytes": 22247,
+      "ms": 110.21330000000307,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -624,7 +624,7 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 14.379899999999907,
+      "ms": 15.821899999999005,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -635,8 +635,8 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 0.8835999999973865,
-      "textBytes": 438,
+      "ms": 0.6935000000012224,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -644,7 +644,7 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 213.66649999999936,
+      "ms": 218.79620000000068,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -653,8 +653,8 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 142.09319999999934,
-      "textBytes": 22247,
+      "ms": 108.27939999999944,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -662,7 +662,7 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 12.751000000000204,
+      "ms": 15.012900000001537,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -673,8 +673,8 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 106.32770000000164,
-      "textBytes": 445,
+      "ms": 105.02310000000216,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -682,7 +682,7 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 202.67700000000332,
+      "ms": 195.58290000000125,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -691,8 +691,8 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 144.3914999999979,
-      "textBytes": 22247,
+      "ms": 107.95019999999931,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -700,7 +700,7 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 17.65190000000075,
+      "ms": 14.355499999997846,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -711,8 +711,8 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 109.2528999999995,
-      "textBytes": 445,
+      "ms": 105.70550000000003,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -720,8 +720,8 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 1.128499999998894,
-      "textBytes": 438,
+      "ms": 0.9519999999974971,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -729,8 +729,8 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 139.94490000000224,
-      "textBytes": 22247,
+      "ms": 108.8760000000002,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -738,7 +738,7 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 14.613199999999779,
+      "ms": 15.916100000002189,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -749,8 +749,8 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 137.33209999999963,
-      "textBytes": 445,
+      "ms": 122.53480000000127,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -758,8 +758,8 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 1.225399999999354,
-      "textBytes": 438,
+      "ms": 0.9919000000008964,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -767,7 +767,7 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 211.88869999999952,
+      "ms": 204.92209999999977,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -776,7 +776,7 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 15.349900000001071,
+      "ms": 13.372299999999086,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -787,8 +787,8 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 117.08099999999831,
-      "textBytes": 445,
+      "ms": 105.95319999999992,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -796,8 +796,8 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 1.165499999999156,
-      "textBytes": 438,
+      "ms": 1.0868000000009488,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -805,7 +805,7 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 190.1348999999973,
+      "ms": 201.2331000000013,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -814,8 +814,8 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 154.45570000000225,
-      "textBytes": 22247,
+      "ms": 102.45439999999871,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -823,8 +823,8 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 142.8775999999998,
-      "textBytes": 445,
+      "ms": 120.55489999999554,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -832,8 +832,8 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 1.1286000000036438,
-      "textBytes": 438,
+      "ms": 1.1154999999998836,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -841,7 +841,7 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 191.63229999999749,
+      "ms": 183.1678000000029,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -850,8 +850,8 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 145.36650000000373,
-      "textBytes": 22247,
+      "ms": 101.77070000000094,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -859,7 +859,7 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 14.145700000000943,
+      "ms": 14.313800000003539,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -870,8 +870,8 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 0.8813000000009197,
-      "textBytes": 438,
+      "ms": 0.83980000000156,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -879,7 +879,7 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 220.2396000000008,
+      "ms": 225.41689999999653,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -888,8 +888,8 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 145.95420000000013,
-      "textBytes": 22247,
+      "ms": 112.80139999999665,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -897,7 +897,7 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 13.485099999998056,
+      "ms": 14.363799999999173,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -908,8 +908,8 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 108.63200000000506,
-      "textBytes": 445,
+      "ms": 106.19830000000366,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -917,7 +917,7 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 209.69599999999627,
+      "ms": 212.81080000000657,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -926,8 +926,8 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 143.00910000000295,
-      "textBytes": 22247,
+      "ms": 106.46429999999964,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -935,7 +935,7 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 14.808599999996659,
+      "ms": 15.766999999999825,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -946,8 +946,8 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 116.4030000000057,
-      "textBytes": 445,
+      "ms": 109.55169999999634,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -955,8 +955,8 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 1.0942999999970198,
-      "textBytes": 438,
+      "ms": 1.0729999999966822,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -964,8 +964,8 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 159.943299999999,
-      "textBytes": 22247,
+      "ms": 112.0344999999943,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -973,7 +973,7 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 15.852700000003097,
+      "ms": 13.483700000004319,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -984,8 +984,8 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 105.47810000000027,
-      "textBytes": 445,
+      "ms": 132.0023000000001,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -993,8 +993,8 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 1.2321999999985565,
-      "textBytes": 438,
+      "ms": 0.9563999999954831,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -1002,7 +1002,7 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 198.5074999999997,
+      "ms": 191.7739999999976,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -1011,7 +1011,7 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 14.722300000001269,
+      "ms": 16.037300000003597,
       "textBytes": 86,
       "imageBytes": 32302,
       "width": 896,
@@ -1022,8 +1022,8 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 131.6501999999964,
-      "textBytes": 445,
+      "ms": 127.75089999999909,
+      "textBytes": 468,
       "imageBytes": 0
     },
     {
@@ -1031,8 +1031,8 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 1.1357999999963795,
-      "textBytes": 438,
+      "ms": 1.0592000000033295,
+      "textBytes": 461,
       "imageBytes": 0
     },
     {
@@ -1040,7 +1040,7 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 186.98040000000037,
+      "ms": 217.3712000000014,
       "textBytes": 85419,
       "imageBytes": 0
     },
@@ -1049,8 +1049,8 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 139.10239999999612,
-      "textBytes": 22247,
+      "ms": 112.35759999999573,
+      "textBytes": 22268,
       "imageBytes": 0
     },
     {
@@ -1058,7 +1058,7 @@
       "round": -2,
       "warmup": true,
       "ok": true,
-      "ms": 376.14280000000144,
+      "ms": 265.0877999999939,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1067,7 +1067,7 @@
       "round": -1,
       "warmup": true,
       "ok": true,
-      "ms": 335.3248999999996,
+      "ms": 281.2908000000025,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1076,7 +1076,7 @@
       "round": 0,
       "warmup": false,
       "ok": true,
-      "ms": 355.13200000000506,
+      "ms": 259.0237999999954,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1085,7 +1085,7 @@
       "round": 1,
       "warmup": false,
       "ok": true,
-      "ms": 330.05019999999786,
+      "ms": 243.23839999999473,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1094,7 +1094,7 @@
       "round": 2,
       "warmup": false,
       "ok": true,
-      "ms": 342.6979999999967,
+      "ms": 278.20440000000235,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1103,7 +1103,7 @@
       "round": 3,
       "warmup": false,
       "ok": true,
-      "ms": 359.14140000000043,
+      "ms": 260.54060000000027,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1112,7 +1112,7 @@
       "round": 4,
       "warmup": false,
       "ok": true,
-      "ms": 343.6055000000051,
+      "ms": 246.5156999999963,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1121,7 +1121,7 @@
       "round": 5,
       "warmup": false,
       "ok": true,
-      "ms": 369.6339000000007,
+      "ms": 246.4979999999996,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1130,7 +1130,7 @@
       "round": 6,
       "warmup": false,
       "ok": true,
-      "ms": 361.70350000000326,
+      "ms": 263.67759999999544,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1139,7 +1139,7 @@
       "round": 7,
       "warmup": false,
       "ok": true,
-      "ms": 326.74619999999413,
+      "ms": 292.12770000000455,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1148,7 +1148,7 @@
       "round": 8,
       "warmup": false,
       "ok": true,
-      "ms": 359.2272000000012,
+      "ms": 247.80040000000008,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1157,7 +1157,7 @@
       "round": 9,
       "warmup": false,
       "ok": true,
-      "ms": 325.12460000000283,
+      "ms": 250.00019999999495,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1166,7 +1166,7 @@
       "round": 10,
       "warmup": false,
       "ok": true,
-      "ms": 359.4412999999986,
+      "ms": 256.3891999999978,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1175,7 +1175,7 @@
       "round": 11,
       "warmup": false,
       "ok": true,
-      "ms": 359.877800000002,
+      "ms": 291.7183999999979,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1184,7 +1184,7 @@
       "round": 12,
       "warmup": false,
       "ok": true,
-      "ms": 325.61470000000554,
+      "ms": 273.77939999999944,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1193,7 +1193,7 @@
       "round": 13,
       "warmup": false,
       "ok": true,
-      "ms": 353.19200000000274,
+      "ms": 261.45850000000064,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1202,7 +1202,7 @@
       "round": 14,
       "warmup": false,
       "ok": true,
-      "ms": 353.3958999999959,
+      "ms": 271.2468999999983,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1211,7 +1211,7 @@
       "round": 15,
       "warmup": false,
       "ok": true,
-      "ms": 342.12740000000485,
+      "ms": 275.27320000000327,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1220,7 +1220,7 @@
       "round": 16,
       "warmup": false,
       "ok": true,
-      "ms": 374.9148999999961,
+      "ms": 262.68679999999586,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1229,7 +1229,7 @@
       "round": 17,
       "warmup": false,
       "ok": true,
-      "ms": 324.86409999999887,
+      "ms": 241.75620000000345,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1238,7 +1238,7 @@
       "round": 18,
       "warmup": false,
       "ok": true,
-      "ms": 341.72329999999783,
+      "ms": 244.3327999999965,
       "calls": 3,
       "selected": "simsunb.ttf"
     },
@@ -1247,25 +1247,25 @@
       "round": 19,
       "warmup": false,
       "ok": true,
-      "ms": 337.454899999997,
+      "ms": 247.72090000000026,
       "calls": 3,
       "selected": "simsunb.ttf"
     }
   ],
   "sourceHashFormat": "UTF-8 text with LF line endings (BOM preserved)",
   "sourceSha256": {
-    "server.mjs": "d511196e024b1ae68fb93a88edeb8c4af9792a84d966d43cf700b325473e1087",
-    "worker.ps1": "35d1d55f93f28f99f79c0a766ebb3ef41bcadadfcbc9c227e2e13b45b949b9b5",
-    "uia-native.cs": "5ea84cd9e4b58ff81c628c6b8d3e77554cd3ffb2a6e8e8dcf562f9a75b301097",
-    "lib/worker.mjs": "c92be74db34205edf472cbcf0bc12142e77373ce7310c5f856159a0138a61240",
+    "server.mjs": "33c3a22d33dd094285f5fd99c93e3e3ce467977512d7019ae6498c830c67eec8",
+    "worker.ps1": "ee67452c643d48ce8797a3f2573625656038fa9847962d30feec89712e7b7740",
+    "uia-native.cs": "efedbebe3920cbffebf8e125911ef4fc76967f07522efe9384f7a74b19e4aa4d",
+    "lib/worker.mjs": "007b971ff9774fee21126184d46df88ac2ee0fbdb7ac441bba43859d61619c03",
     "lib/cdp.mjs": "8a5be88a19d34f84bc000e8151ff17939283d486f063ebeadbc4c1838b9a361e",
     "lib/batch.mjs": "3195cd32f91da7ac171f844f9b8acf208b51db2b8b3aedde15b62276495e289b",
     "lib/stats.mjs": "186fb7d3e201f7b55de628ef9343eea5181fec9f6391b8237afd94ae228d0a6a",
-    "package-lock.json": "1f5fb6a401d0866cbdfca49c0e18518bbc801bd02a7450bf8b3f454528a5df97",
+    "package-lock.json": "b42da97f96217eca1e6f3c07c363cce1cd0d326a0a452b4cb33e31e0452c5e48",
     "benchmark.mjs": "30401526e22812fcb6988e104486dbf3510262831d421fd44aae394ec9a8f725",
     "examples/font-catalog.ps1": "59afba62f6f054312ca2a9da1d37111b75a3bc3092b3e491792f30910a08d668"
   },
-  "startupMs": 792.3117,
+  "startupMs": 814.0215000000001,
   "nativeUia": true,
   "summary": {
     "find_uncached": {
@@ -1273,17 +1273,17 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 105.47810000000027,
-        "p50": 112.99500000000262,
-        "p95": 142.8775999999998,
-        "max": 143.04559999999947
+        "min": 105.02310000000216,
+        "p50": 109.55169999999634,
+        "p95": 129.85449999999946,
+        "max": 132.0023000000001
       },
       "textBytes": {
         "n": 20,
-        "min": 444,
-        "p50": 445,
-        "p95": 445,
-        "max": 445
+        "min": 467,
+        "p50": 468,
+        "p95": 468,
+        "max": 468
       },
       "imageBytes": null
     },
@@ -1292,17 +1292,17 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 0.8813000000009197,
-        "p50": 1.1286000000000058,
-        "p95": 1.225399999999354,
-        "max": 1.2321999999985565
+        "min": 0.6935000000012224,
+        "p50": 1.0059000000001106,
+        "p95": 1.162000000000262,
+        "max": 1.192800000000716
       },
       "textBytes": {
         "n": 20,
-        "min": 437,
-        "p50": 438,
-        "p95": 438,
-        "max": 438
+        "min": 460,
+        "p50": 461,
+        "p95": 461,
+        "max": 461
       },
       "imageBytes": null
     },
@@ -1311,10 +1311,10 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 170.54989999999998,
-        "p50": 201.44930000000022,
-        "p95": 220.2396000000008,
-        "max": 242.40940000000046
+        "min": 176.60629999999946,
+        "p50": 203.72729999999956,
+        "p95": 221.98309999999947,
+        "max": 225.41689999999653
       },
       "textBytes": {
         "n": 20,
@@ -1330,17 +1330,17 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 139.10239999999612,
-        "p50": 145.36650000000373,
-        "p95": 161.73570000000018,
-        "max": 162.50049999999828
+        "min": 101.77070000000094,
+        "p50": 108.8760000000002,
+        "p95": 115.35150000000067,
+        "max": 115.8137999999999
       },
       "textBytes": {
         "n": 20,
-        "min": 22246,
-        "p50": 22247,
-        "p95": 22247,
-        "max": 22247
+        "min": 22267,
+        "p50": 22268,
+        "p95": 22268,
+        "max": 22268
       },
       "imageBytes": null
     },
@@ -1349,10 +1349,10 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 12.751000000000204,
-        "p50": 14.777899999999136,
-        "p95": 17.65190000000075,
-        "max": 18.136899999999514
+        "min": 12.795799999999872,
+        "p50": 15.012900000001537,
+        "p95": 17.515699999999924,
+        "max": 18.360799999998562
       },
       "textBytes": {
         "n": 20,
@@ -1374,10 +1374,10 @@
       "failed": 0,
       "latencyMs": {
         "n": 20,
-        "min": 324.86409999999887,
-        "p50": 343.6055000000051,
-        "p95": 369.6339000000007,
-        "max": 374.9148999999961
+        "min": 241.75620000000345,
+        "p50": 259.0237999999954,
+        "p95": 291.7183999999979,
+        "max": 292.12770000000455
       },
       "textBytes": null,
       "imageBytes": null

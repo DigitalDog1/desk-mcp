@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.2 — 2026-11-14
+
+- Move to click coordinates before pressing; focus the exact requested hwnd and verify foreground ownership. Use the selected hwnd for resize, close, desktop routing and OCR capture too.
+- Require an explicit target for control mutations. Addressed keyboard/paste input checks focus, validates SendInput counts and verifies the resulting value; reject read-only fields before input.
+- Visit shallow controls before large lists; report SearchIncomplete when a partial traversal cannot establish absence.
+- Preserve native UIA timeout codes, terminate abandoned jobs and trip the matching circuit breaker without retrying through PowerShell.
+- Give batches a 45-second default total deadline, configurable up to 120 seconds; propagate client cancellation and prevent later steps after cancellation/deadline.
+- Diagnose recognized antivirus startup blocks as SecurityBlocked; fail visibly if a requested audit log is unavailable. Handle empty clipboard writes and empty paste.
+- Add 18 disposable-window regression checks, update EN/RU usage notes and rerun the independently verified benchmark. Demo media is unchanged.
+
 ## 1.5.1 — 2026-11-13
 
 - Fix worker startup races, rejection/timer cleanup, broken stdin and late execution after a request deadline.

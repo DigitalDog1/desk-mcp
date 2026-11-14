@@ -132,6 +132,7 @@ public class DeskMcp {
     }
 
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
@@ -532,11 +533,15 @@ public class DeskMcp {
         // оставит потоки ввода сцепленными, и последующие клики будут уходить
         // не туда — вплоть до залипания модификаторов.
         try {
-            ShowWindow(h, 9);
+            if (IsIconic(h)) ShowWindow(h, 9);
             BringWindowToTop(h);
-            bool ok = SetForegroundWindow(h);
+            SetForegroundWindow(h);
             SetActiveWindow(h);
-            return ok;
+            for (int i = 0; i < 25; i++) {
+                if (GetForegroundWindow() == h) return true;
+                System.Threading.Thread.Sleep(10);
+            }
+            return false;
         } finally {
             if (attached) AttachThreadInput(myThread, fgThread, false);
         }
@@ -545,7 +550,7 @@ public class DeskMcp {
 '@ -ReferencedAssemblies System.Drawing
 }
 
-if (-not ("DeskMcp" -as [type])) { Fail 'WorkerRestarted' "Класс DeskMcp не скомпилировался — воркер не может работать" }
+if (-not ("DeskMcp" -as [type])) { throw "Класс DeskMcp не скомпилировался — воркер не может работать" }
 
 
 if (-not ("VDesk" -as [type])) {
@@ -687,6 +692,10 @@ if ($env:DESK_UIA_BUDGET_MS) {
 $script:DryRun = ($env:DESK_DRY_RUN -eq '1')
 $script:AuditOn = (($env:DESK_AUDIT -eq '1') -or [bool]$env:DESK_AUDIT_PATH)
 $script:AuditPath = if ($env:DESK_AUDIT_PATH) { $env:DESK_AUDIT_PATH } else { Join-Path $env:TEMP 'desk-mcp-audit.log' }
+if ($script:AuditOn) {
+    try { [System.IO.File]::AppendAllText($script:AuditPath, '', (New-Object System.Text.UTF8Encoding($false))) }
+    catch { throw "AuditUnavailable: журнал недоступен '$($script:AuditPath)': $($_.Exception.Message)" }
+}
 $script:AllowTitles = @()
 if ($env:DESK_ALLOW_TITLES) {
     $script:AllowTitles = @($env:DESK_ALLOW_TITLES -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -748,7 +757,7 @@ function Write-AuditLog([string]$tool, $a, $started, [string]$outcome, $result) 
         [System.IO.File]::AppendAllText($script:AuditPath, $line + [Environment]::NewLine,
             (New-Object System.Text.UTF8Encoding($false)))
     } catch {
-        # Журнал не имеет права ломать вызов. Тишина здесь правильнее ошибки.
+        [Console]::Error.WriteLine("AuditUnavailable: запись журнала не удалась: $($_.Exception.Message)")
     }
 }
 if (-not ("UiaNative" -as [type])) {
@@ -767,14 +776,7 @@ if (-not ("UiaNative" -as [type])) {
 }
 
 function Invoke-UiAct([string]$action, $a, [int]$depth, [int]$limit) {
-    # Поиск элемента и действие на STA-потоке нативного слоя. Возвращает
-    # $null, если путь недоступен (нет нативного слоя, окно не нашлось,
-    # любая нештатная ситуация), тогда вызывающий молча уходит на старый
-    # путь из PowerShell.
-    #
-    # try охватывает ВСЁ тело, а не только вызов нативного метода: если
-    # упадёт даже поиск окна, контракт "молча уходи на фоллбэк" должен
-    # выдержать и это.
+    # Таймаут и неполный поиск не повторяются через запасной PowerShell-путь.
     try {
         if (-not $script:NativeUia) { return $null }
         if ($a -and $null -ne $a.elementId -and "$($a.elementId)".Trim() -ne '') {
@@ -796,9 +798,13 @@ function Invoke-UiAct([string]$action, $a, [int]$depth, [int]$limit) {
             [int]$script:UiaBudgetMs, $hwnd, $action, $searchName, [string]$a.type,
             [string]$a.id, [int]$depth, [string]$a.value, [int]$limit
         )
-        return (Invoke-UiaNative 'RunActByHwnd' $argv | ConvertFrom-Json)
+        $nativeResult = Invoke-UiaNative 'RunActByHwnd' $argv | ConvertFrom-Json
+        if ($nativeResult.status -eq 'incomplete') { Fail 'SearchIncomplete' 'Поиск остановлен по бюджету до нахождения цели; отсутствие элемента не доказано' }
+        if ($script:UiaDiag -and $nativeResult.status -eq 'error') { [Console]::Error.WriteLine("UIA fallback: " + $nativeResult.error) }
+        return $nativeResult
     } catch {
-        # Нативный путь не сработал: это не повод ломать вызов, откатываемся.
+        if ($script:LastErrorCode -in @('Timeout', 'SearchIncomplete', 'InvalidArgument')) { throw }
+        if ($script:UiaDiag) { [Console]::Error.WriteLine("UIA fallback: " + $_.Exception.Message) }
         return $null
     }
 }
@@ -817,7 +823,8 @@ function Invoke-UiaNative([string]$method, [object[]]$argv) {
         [Console]::Error.WriteLine("UIA-DIAG: $($script:UiaDiag)")
     }
     if ($r.Ok) { return $r.Data }
-    Fail 'NotSupported' "Нативный слой UIA: $method вернул '$($r.Status)' ($($r.Error))"
+    $code = if ($r.Status -eq 'timeout') { 'Timeout' } else { 'NotSupported' }
+    Fail $code "Нативный слой UIA: $method вернул '$($r.Status)' ($($r.Error))"
 }
 
 if (-not ("MsTree" -as [type])) {
@@ -1798,7 +1805,7 @@ function Search-UiElements {
             $el = $top[0]; $depth = [int]$top[1]
             if ($depth -gt $MaxDepth) { continue }
             $counter++
-            if ($counter -gt 4000) { break }
+            if ($counter -gt 4000) { Fail 'SearchIncomplete' 'Поиск остановлен по лимиту просмотренных элементов' }
             try {
                 $c = $el.Current
                 $ct = $c.ControlType.ProgrammaticName -replace '^ControlType\.', ''
@@ -2190,9 +2197,42 @@ function Test-Permissions {
 }
 
 
+function Send-ControlShortcut([uint16]$key) {
+    $held = [DeskMcp]::KeyDown(0x11)
+    $sent = 0
+    try {
+        if (-not $held) { $sent += [DeskMcp]::VKey(0x11, $false) }
+        $sent += [DeskMcp]::VKey($key, $false)
+        $sent += [DeskMcp]::VKey($key, $true)
+    } finally {
+        if (-not $held) { $sent += [DeskMcp]::VKey(0x11, $true) }
+    }
+    $expected = if ($held) { 2 } else { 4 }
+    if ($sent -ne $expected) { Fail 'InputBlocked' 'SendInput не принял сочетание клавиш' }
+}
+
+function Assert-InputTarget($a, [long]$hwnd) {
+    if ([DeskMcp]::GetForegroundWindow().ToInt64() -ne $hwnd) { Fail 'FocusNotAcquired' 'Фокус ушёл из адресованного окна; ввод остановлен' }
+    $state = Invoke-UiAct 'check_focus' $a 8 1
+    if (-not $state -or -not $state.focused) { Fail 'FocusNotAcquired' 'Целевое поле не имеет фокуса; ввод остановлен' }
+}
+
 function Invoke-Tool {
     param([string]$tool, $a)
     $result = $null
+    if ($tool -in @('invoke', 'set_value', 'select_text', 'select')) {
+        $hasReference = $a -and -not [string]::IsNullOrWhiteSpace([string]$a.elementId)
+        $hasWindow = $a -and (($a.hwnd -and [long]$a.hwnd -gt 0) -or -not [string]::IsNullOrWhiteSpace([string]$a.title))
+        $hasSelector = $a -and ($a.name -or $a.id -or $a.type)
+        if (-not $hasReference -and (-not $hasWindow -or -not $hasSelector)) {
+            Fail 'InvalidArgument' 'Укажи elementId или title/hwnd вместе с name, id или type; действие без явной цели запрещено'
+        }
+    }
+    if ($tool -in @('focus', 'set_frame', 'close_window')) {
+        if (-not $a -or (-not $a.hwnd -and [string]::IsNullOrWhiteSpace([string]$a.title))) {
+            Fail 'InvalidArgument' 'Укажи title или hwnd выбранного окна'
+        }
+    }
     switch ($tool) {
             'screenshot' {
                 $fmt = if ($a.format) { $a.format } else { 'png' }
@@ -2227,14 +2267,13 @@ function Invoke-Tool {
                     'of_window' {
                         $w = Find-WindowByTitle ([string]$a.title) 3 (Get-ArgHwnd $a)
                         if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не найдено" }
-                        $proc = Get-Process -Id $w.process
-                        $result = [ordered]@{ title = $w.title; desktop = [VDesk]::OfWindow($proc.MainWindowHandle) }
+                        $result = [ordered]@{ title = $w.title; desktop = [VDesk]::OfWindow([IntPtr][long]$w.hwnd) }
                     }
                     'move_window' {
                         $w = Find-WindowByTitle ([string]$a.title) 3 (Get-ArgHwnd $a)
                         if (-not $w) { throw "Окно '*$($a.title)*' не найдено" }
                         $proc = Get-Process -Id $w.process
-                        [VDesk]::MoveWindowTo($proc.MainWindowHandle, [string]$a.id)
+                        [VDesk]::MoveWindowTo([IntPtr][long]$w.hwnd, [string]$a.id)
                         $result = [ordered]@{ ok = $true; title = $w.title; desktop = [string]$a.id }
                     }
                     default { Fail 'InvalidArgument' "Неизвестное действие desktop: '$action' (list|create|switch|close|of_window|move_window)" }
@@ -2278,8 +2317,9 @@ function Invoke-Tool {
                         $mods += $mv
                     }
                 }
-                if ($a.hoverFirst) { [DeskMcp]::MoveTo($cx, $cy); Start-Sleep -Milliseconds 250 }
-                elseif ($mods.Count -gt 0) { [DeskMcp]::MoveTo($cx, $cy); Start-Sleep -Milliseconds 60 }
+                [DeskMcp]::MoveTo($cx, $cy)
+                if ($a.hoverFirst) { Start-Sleep -Milliseconds 250 }
+                elseif ($mods.Count -gt 0) { Start-Sleep -Milliseconds 60 }
                 $wasDown = @()
                 foreach ($m in $mods) {
                     $wasDown += [DeskMcp]::KeyDown([uint16]$m)
@@ -2482,13 +2522,11 @@ function Invoke-Tool {
                 $mode = if ($a.inputMode) { [string]$a.inputMode } else { 'unicode' }
                 $delay = if ($a.delayMs) { [int]$a.delayMs } else { 0 }
                 if ($mode -eq 'paste') {
-                    Set-Clipboard -Value $txt
-                    $null = [DeskMcp]::VKey(0x11, $false)
-                    $null = [DeskMcp]::VKey(0x56, $false)
-                    Start-Sleep -Milliseconds 30
-                    $null = [DeskMcp]::VKey(0x56, $true)
-                    $null = [DeskMcp]::VKey(0x11, $true)
-                    $result = [ordered]@{ ok = $true; mode = 'paste'; chars = $txt.Length }
+                    if ($txt.Length -gt 0) {
+                        Set-Clipboard -Value $txt
+                        Send-ControlShortcut 0x56
+                    }
+                    $result = [ordered]@{ ok = $true; verified = $false; mode = 'paste'; chars = $txt.Length }
                 } else {
                     $n = if ($delay -gt 0) {
                         $sent = 0
@@ -2503,7 +2541,7 @@ function Invoke-Tool {
                     if ($txt.Length -gt 0 -and $n -ne $txt.Length * 2) {
                         Fail 'InputBlocked' "SendInput принял $n событий из $($txt.Length * 2) — ввод заблокирован (UIPI?)"
                     }
-                    $result = [ordered]@{ ok = $true; mode = 'unicode'; chars = $txt.Length; events = $n }
+                    $result = [ordered]@{ ok = $true; verified = $false; mode = 'unicode'; chars = $txt.Length; events = $n }
                 }
             }
 
@@ -2544,9 +2582,9 @@ function Invoke-Tool {
             'focus' {
                 $w = Find-WindowByTitle ([string]$a.title) 3 (Get-ArgHwnd $a)
                 if (-not $w) { Fail 'WindowNotFound' "Окно с заголовком '*$($a.title)*' не найдено за 3 с" }
-                $p = Get-Process -Id $w.process
-                $ok = [DeskMcp]::Focus($p.MainWindowHandle)
-                $result = [ordered]@{ ok = $ok; title = $w.title; process = $w.process }
+                $ok = [DeskMcp]::Focus([IntPtr][long]$w.hwnd)
+                if (-not $ok) { Fail 'FocusNotAcquired' "Windows не передала фокус окну '$($w.title)'; ввод отменён" }
+                $result = [ordered]@{ ok = $true; title = $w.title; hwnd = $w.hwnd; process = $w.process; verified = $true }
             }
 
             'wait_window' {
@@ -2567,7 +2605,8 @@ function Invoke-Tool {
                 $w = Find-WindowByTitle ([string]$a.title) 3 (Get-ArgHwnd $a)
                 if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не найдено" }
                 $p = Get-Process -Id $w.process -ErrorAction SilentlyContinue
-                if ($a.force) { $p.Kill() } else { $p.CloseMainWindow() | Out-Null }
+                if ($a.force) { $p.Kill() }
+                elseif (-not [DeskMcp]::PostMessage([IntPtr][long]$w.hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) { Fail 'InputBlocked' 'Не удалось отправить WM_CLOSE выбранному окну' }
                 $result = [ordered]@{ ok = $true; title = $w.title; forced = [bool]$a.force }
             }
 
@@ -2675,8 +2714,7 @@ function Invoke-Tool {
                         if ($w -and $w.rect -and $w.rect.w -gt 0 -and $w.rect.h -gt 0) {
                             $region = "$($w.rect.x),$($w.rect.y),$($w.rect.w),$($w.rect.h)"
                             $winTitle = $w.title
-                            $proc = Get-Process -Id $w.process -ErrorAction SilentlyContinue
-                            if ($proc) { $captureHwnd = $proc.MainWindowHandle }
+                            $captureHwnd = [IntPtr][long]$w.hwnd
                         }
                     }
                     $rp = $region -split ','
@@ -2744,7 +2782,10 @@ function Invoke-Tool {
             }
 
             'clipboard_set' {
-                Set-Clipboard -Value ([string]$a.text)
+                if ([string]::IsNullOrEmpty([string]$a.text)) {
+                    Add-Type -AssemblyName System.Windows.Forms
+                    [System.Windows.Forms.Clipboard]::Clear()
+                } else { Set-Clipboard -Value ([string]$a.text) }
                 $result = [ordered]@{ ok = $true; length = ([string]$a.text).Length }
             }
 
@@ -2811,6 +2852,7 @@ function Invoke-Tool {
                 $result = Get-UiCached $key {
                     # STA-путь: поиск на STA-потоке, без PowerShell в UIA.
                     $nat = Invoke-UiAct 'find' $a $depth $limit
+                    if ($nat -and $nat.status -eq 'notfound') { Fail 'ElementNotFound' 'Не найдено ни одного элемента по заданным условиям' }
                     if ($nat -and $nat.status -eq 'ok') {
                         $cnt = [int]$nat.count
                         if ($reqUnique -and $cnt -gt 1) {
@@ -2855,7 +2897,6 @@ function Invoke-Tool {
                         $result = [ordered]@{ ok = $true; via = $nat.via; element = $nat.element }
                         break
                     }
-                    # notfound сюда НЕ бросаем при поиске по заголовку.
                 }
                 if ($a -and $null -ne $a.elementId -and "$($a.elementId)".Trim() -ne '') {
                     Fail 'ElementNotFound' "Элемент '$($a.elementId)' не найден или больше недоступен"
@@ -2917,7 +2958,6 @@ function Invoke-Tool {
                             $result = [ordered]@{ ok = $true; via = $nat.via; value = $val; element = $nat.element }
                             break
                         }
-                        # notfound уходит в фоллбэк по той же причине, что и в invoke.
                     }
                     if ($a -and $null -ne $a.elementId -and "$($a.elementId)".Trim() -ne '') {
                         Fail 'ElementNotFound' "Элемент '$($a.elementId)' не найден или больше недоступен"
@@ -2937,75 +2977,54 @@ function Invoke-Tool {
                         Fail 'PatternUnavailable' "У элемента нет доступного для записи ValuePattern: $($_.Exception.Message)"
                     }
                 } else {
-                    $targetInfo = $null
-                    $focused = $false
-                    if ($script:NativeUia) {
-                        $foc = Invoke-UiAct 'focus' $a $depth 1
-                        if ($foc -and $foc.status -eq 'disabled') {
-                            Fail 'ElementDisabled' "Элемент '$($foc.element.name)' неактивен (enabled=false): поле отключено приложением, ввод не пройдёт."
-                        }
-                        if ($foc -and $foc.status -eq 'stale') {
-                            Fail 'ElementNotFound' "$($foc.error)"
-                        }
-                        if ($foc -and $foc.status -eq 'ok') {
-                            $focused = $true
-                            $targetInfo = $foc.element
+                    if (-not $script:NativeUia) { Fail 'NotSupported' 'Адресный клавиатурный ввод требует нативный UIA-слой для проверки фокуса и результата' }
+                    $described = Invoke-UiAct 'describe' $a $depth 1
+                    if (-not $described -or $described.status -ne 'ok') {
+                        if ($described.status -eq 'disabled') { Fail 'ElementDisabled' 'Поле отключено приложением' }
+                        Fail 'ElementNotFound' 'Целевое поле недоступно'
+                    }
+                    $targetInfo = $described.element
+                    if (@($targetInfo.patterns) -notcontains 'ValuePattern') { Fail 'PatternUnavailable' 'Для подтверждения адресного ввода требуется ValuePattern' }
+                    if ($targetInfo.readOnly) { Fail 'PatternUnavailable' 'Поле доступно только для чтения; ввод не отправлен' }
+                    $targetHwnd = [long]$targetInfo.hwnd
+                    if ($targetHwnd -eq 0 -or -not [DeskMcp]::Focus([IntPtr]$targetHwnd)) {
+                        Fail 'FocusNotAcquired' 'Не удалось активировать адресованное окно; ввод не отправлен'
+                    }
+                    $targetArgs = [pscustomobject]@{ elementId = [string]$targetInfo.elementId; value = $val }
+                    $focused = Invoke-UiAct 'focus' $targetArgs $depth 1
+                    $focusDeadline = (Get-MonoMs) + 500
+                    while ($true) {
+                        try { Assert-InputTarget $targetArgs $targetHwnd; break }
+                        catch {
+                            if ($script:LastErrorCode -ne 'FocusNotAcquired' -or (Get-MonoMs) -ge $focusDeadline) { throw }
+                            $script:LastErrorCode = ''
+                            Start-Sleep -Milliseconds 25
                         }
                     }
-                    if (-not $focused) {
-                        if ($a -and $null -ne $a.elementId -and "$($a.elementId)".Trim() -ne '') {
-                            Fail 'ElementNotFound' "Элемент '$($a.elementId)' не найден или больше недоступен"
-                        }
-                        $hits = Resolve-Target $a
-                        if (@($hits).Count -eq 0) { Fail 'ElementNotFound' "Элемент '$($a.name)' не найден" }
-                        $el = @($hits)[0][0]
-                        $targetInfo = Convert-ElementInfo @($hits)[0]
-                        if ($targetInfo['enabled'] -eq $false) {
-                            Fail 'ElementDisabled' "Элемент '$($targetInfo['name'])' неактивен (enabled=false): поле отключено приложением, ввод не пройдёт."
-                        }
-                        try {
-                            $el.SetFocus()
-                            $focused = $true
-                            Start-Sleep -Milliseconds 40
-                        } catch {
-                            $r = $targetInfo['rect']
-                            if ($r['w'] -gt 0 -and $r['h'] -gt 0) {
-                                $cx = $r['x'] + [int]($r['w'] / 2)
-                                $cy = $r['y'] + [int]($r['h'] / 2)
-                                [DeskMcp]::MoveTo($cx, $cy)
-                                Start-Sleep -Milliseconds 60
-                                [DeskMcp]::Click('left', 1)
-                                $focused = $true
-                                Start-Sleep -Milliseconds 60
-                            }
-                        }
-                    }
-                    if (-not $focused) { Fail 'InputBlocked' 'Не удалось сфокусировать целевое поле; ввод отменён' }
-                    Start-Sleep -Milliseconds 30
-                    $null = [DeskMcp]::VKey(0x11, $false)
-                    $null = [DeskMcp]::VKey(0x41, $false)
-                    Start-Sleep -Milliseconds 20
-                    $null = [DeskMcp]::VKey(0x41, $true)
-                    $null = [DeskMcp]::VKey(0x11, $true)
-                    Start-Sleep -Milliseconds 20
-                    $null = [DeskMcp]::VKey(0x08, $false)
-                    Start-Sleep -Milliseconds 20
-                    $null = [DeskMcp]::VKey(0x08, $true)
-                    Start-Sleep -Milliseconds 40
-
-                    if ($mode -eq 'paste') {
+                    Send-ControlShortcut 0x41
+                    Assert-InputTarget $targetArgs $targetHwnd
+                    $down = [DeskMcp]::VKey(0x08, $false)
+                    $up = [DeskMcp]::VKey(0x08, $true)
+                    if ($down + $up -ne 2) { Fail 'InputBlocked' 'SendInput не принял очистку поля' }
+                    Assert-InputTarget $targetArgs $targetHwnd
+                    if ($mode -eq 'paste' -and $val.Length -gt 0) {
                         Set-Clipboard -Value $val
-                        Start-Sleep -Milliseconds 40
-                        $null = [DeskMcp]::VKey(0x11, $false)
-                        $null = [DeskMcp]::VKey(0x56, $false)
-                        Start-Sleep -Milliseconds 30
-                        $null = [DeskMcp]::VKey(0x56, $true)
-                        $null = [DeskMcp]::VKey(0x11, $true)
-                        $result = [ordered]@{ ok = $true; via = 'paste'; value = $val; element = $targetInfo }
+                        Assert-InputTarget $targetArgs $targetHwnd
+                        Send-ControlShortcut 0x56
                     } else {
                         $n = [DeskMcp]::TypeUnicode($val)
-                        $result = [ordered]@{ ok = $true; via = 'type'; value = $val; chars = $val.Length; events = $n; element = $targetInfo }
+                        if ($n -ne $val.Length * 2) { Fail 'InputBlocked' 'SendInput принял не весь текст' }
                     }
+                    $verified = $null
+                    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+                        $verified = Invoke-UiAct 'verify_value' $targetArgs $depth 1
+                        if ($verified -and $verified.matches) { break }
+                        Start-Sleep -Milliseconds 50
+                    }
+                    if (-not $verified -or -not $verified.matches) {
+                        Fail 'InputNotVerified' 'Ввод был отправлен, но значение поля не подтверждено; перечитай состояние перед повтором'
+                    }
+                    $result = [ordered]@{ ok = $true; verified = $true; via = $mode; value = $val; element = $verified.element }
                 }
             }
 
@@ -3029,6 +3048,7 @@ function Invoke-Tool {
                             }
                             break
                         }
+                        if ($nat.status -eq 'incomplete') { Fail 'SearchIncomplete' 'Поиск таблицы остановлен по бюджету; отсутствие элемента не доказано' }
                         if ($nat.status -eq 'notfound') {
                             Fail 'ElementNotFound' "Элемент '$($a.name)' не найден — читать нечего"
                         }
@@ -3210,8 +3230,7 @@ function Invoke-Tool {
             'set_frame' {
                 $w = Find-WindowByTitle ([string]$a.title) 3 (Get-ArgHwnd $a)
                 if (-not $w) { Fail 'WindowNotFound' "Окно '*$($a.title)*' не найдено за 3 с" }
-                $p = Get-Process -Id $w.process
-                $h = $p.MainWindowHandle
+                $h = [IntPtr][long]$w.hwnd
                 $x = if ($null -ne $a.x) { [int]$a.x } else { $w.rect.x }
                 $y = if ($null -ne $a.y) { [int]$a.y } else { $w.rect.y }
                 $ww = if ($a.width)  { [int]$a.width }  else { $w.rect.w }

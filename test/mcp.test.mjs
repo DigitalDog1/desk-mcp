@@ -60,3 +60,32 @@ test("invalid browser executable returns a tool error without crashing the serve
     assert.equal((await client.listTools()).tools.length, 46);
   } finally { await client.close(); }
 });
+
+
+test("an unscoped UIA timeout does not block a different target key", { skip: process.platform !== "win32", timeout: 15000 }, async () => {
+  const client = new Client({ name: "breaker-isolation", version: "1" });
+  try {
+    await client.connect(new StdioClientTransport({ command: process.execPath, args: [script], stderr: "pipe",
+      env: { ...process.env, DESK_UI_TIMEOUT_MS: "1" } }));
+    const first = await client.callTool({ name: "computer_find", arguments: { id: "missing" } });
+    assert.match(first.content[0].text, /code: Timeout/);
+    const targeted = await client.callTool({ name: "computer_find", arguments: { hwnd: 2147483647, id: "missing" } });
+    assert.match(targeted.content[0].text, /code: Timeout/);
+    const repeated = await client.callTool({ name: "computer_find", arguments: { id: "missing" } });
+    assert.match(repeated.content[0].text, /code: UIABlocked/);
+  } finally { await client.close(); }
+});
+
+test("an unusable requested audit path fails startup visibly", { skip: process.platform !== "win32", timeout: 15000 }, async () => {
+  const fs = await import("node:fs/promises"), os = await import("node:os"), path = await import("node:path");
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "desk-audit-test-"));
+  const client = new Client({ name: "audit-failure", version: "1" });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [script], stderr: "pipe",
+    env: { ...process.env, DESK_AUDIT: "1", DESK_AUDIT_PATH: path.join(dir, "missing-parent", "audit.log") } });
+  let diagnostic = "";
+  transport.stderr.on("data", d => diagnostic += d);
+  try {
+    await assert.rejects(client.connect(transport));
+    assert.match(diagnostic, /AuditUnavailable/);
+  } finally { await client.close(); await fs.rm(dir, { recursive: true, force: true }); }
+});

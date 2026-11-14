@@ -1,6 +1,6 @@
 {
   "name": "desk-mcp",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "type": "module",
   "license": "Apache-2.0",
   "description": "MCP server for automating the Windows desktop: UI Automation, MSAA, Chrome DevTools Protocol, OCR and WinAPI input. Node.js plus the PowerShell that ships with Windows, no native modules.",
@@ -54,7 +54,8 @@
     "check:docs": "node check-docs.mjs",
     "test:unit": "node --test",
     "test:smoke": "node smoke.mjs",
-    "check:package": "node check-package.mjs"
+    "check:package": "node check-package.mjs",
+    "test:hardening": "node regression.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
