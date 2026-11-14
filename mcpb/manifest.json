@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "desk-mcp",
   "display_name": "desk-mcp (Windows desktop)",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Windows desktop automation MCP server: screenshots, OCR, mouse and keyboard input, and element trees from UI Automation, MSAA and Chrome DevTools Protocol. Zero external binaries.",
   "long_description": "46 tools for Windows desktop automation over stdio. A long-lived PowerShell worker provides UI Automation, MSAA, OCR and WinAPI input. Separate CDP tools control Chrome/Edge. No native npm modules or separate build toolchain required.",
   "author": {

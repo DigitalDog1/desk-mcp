@@ -99,3 +99,43 @@ test("shutdown cancels pending restart backoff without spawning another worker",
   await assert.rejects(result, { code: "WorkerRestarted" });
   assert.equal(children.length, 0);
 });
+
+for (const [diagnostic, code] of [["ScriptContainedMaliciousContent", "SecurityBlocked"], ["AuditUnavailable: denied", "AuditUnavailable"]]) {
+  test("startup reports " + code + " instead of a generic worker exit", async () => {
+    const { worker, children } = fixture();
+    const ready = worker.start();
+    children[0].stderr.write(diagnostic);
+    children[0].kill();
+    await assert.rejects(ready, { code });
+    assert.equal(worker.alive, false);
+  });
+}
+
+test("cancelling during startup never dispatches the action", async () => {
+  const { worker, children } = fixture();
+  const controller = new AbortController();
+  const result = worker.call("invoke", {}, 500, { signal: controller.signal });
+  await tick();
+  controller.abort();
+  await assert.rejects(result, { code: "Cancelled" });
+  children[0].respond({ id: 0, data: {} });
+  await tick();
+  assert.deepEqual(children[0].requests, []);
+  await worker.stop();
+});
+
+test("cancelling sent work kills its worker and rejects queued work", async () => {
+  const { worker, children } = fixture();
+  worker.start(); children[0].respond({ id: 0, data: {} });
+  const controller = new AbortController();
+  const result = Promise.allSettled([
+    worker.call("wait", { ms: 1000 }, 500, { signal: controller.signal }),
+    worker.call("invoke", {}, 500),
+  ]);
+  await tick(); controller.abort();
+  const responses = await result;
+  assert.equal(responses[0].reason.code, "Cancelled");
+  assert.equal(responses[1].reason.code, "WorkerRestarted");
+  assert.equal(worker.alive, false);
+  assert.equal(worker.pending.size, 0);
+});

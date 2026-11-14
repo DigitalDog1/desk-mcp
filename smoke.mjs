@@ -137,7 +137,13 @@ await check("computer_active_window", {}, (r, t) => t.includes('"pid"'));
 await checkTarget("computer_verify_state", { title: tKey, expect: [
   { label: "кнопка есть", selector: { role: "Button", label_contains: "Новая вкладка" } },
   { label: "нет такого", selector: { role: "Button", label_contains: "ZZZнеттакого" } },
-] }, (r, t) => t.includes("unsatisfied"));
+] }, (r, t) => {
+  if (r.isError) return false;
+  const data = JSON.parse(t);
+  return data.ok === false && data.checks.length === 2 && data.checks.every(c =>
+    ["satisfied", "unsatisfied", "unknown"].includes(c.state) &&
+    (c.state !== "unknown" || c.detail.length > 0));
+});
 
 console.log("== дельты: повторное чтение не платит дважды ==");
 if (tKey) {
@@ -206,9 +212,9 @@ if (tKey) {
 }
 
 console.log("== ожидание элемента (вместо сна и вслепую) ==");
-// Таймаут — исход ожидания, а не поломка: satisfied:false с причиной timeout.
+// Полный поиск может завершиться ожиданием; неполный обход обязан явно отказать.
 await checkTarget("computer_wait_element", { title: tKey, name: "ZZZнеттакого", mode: "appear", timeoutMs: 600 },
-  (r, t) => /"satisfied":\s*false/.test(t) && /"reason":\s*"timeout"/.test(t));
+  (r, t) => (r.isError && /code: SearchIncomplete/.test(t)) || (/"satisfied":\s*false/.test(t) && /"reason":\s*"timeout"/.test(t)));
 // Состояние берём с элемента, который find уже нашёл: цель не выдумывается.
 const btnRes = tKey ? await call("computer_find", { title: tKey, type: "Button", limit: 1 }) : null;
 let btn = null;
@@ -226,14 +232,14 @@ console.log("== таблица и выбор: отказ там, где данн
 // Таблицы в окне может не быть, но несуществующий элемент это всегда отказ
 // с кодом, и код обязан называть причину, а не молчать.
 await checkTarget("computer_read_table", { title: tKey, name: "ZZZнеттакойтаблицы" },
-  (r, t) => /ElementNotFound/.test(t));
+  (r, t) => r.isError && /code: (ElementNotFound|SearchIncomplete)/.test(t));
 // Без title искать негде, и отказ обязан говорить про окно, а не про
 // несуществующий сломанный нативный слой (такой текст тут и выдавался).
 await check("computer_read_table", { id: "ZZZ" }, (r, t) => /WindowNotFound/.test(t));
 await check("computer_select", { name: "ZZZнеттакой", value: "x" }, (r, t) => /InvalidArgument/.test(t));
 // Нулевой бюджет это «проверь один раз и не жди», а не дефолт 5000.
 await check("computer_wait_element", { title: tKey, name: "ZZZнеттакого", mode: "appear", timeoutMs: 0 },
-  (r, t) => /"probes":\s*1/.test(t) && /"timeoutMs":\s*0/.test(t));
+  (r, t) => (r.isError && /code: SearchIncomplete/.test(t)) || (/"probes":\s*1/.test(t) && /"timeoutMs":\s*0/.test(t)));
 // Кнопка не умеет выбор: это «паттерна нет», а не «нет такого варианта».
 // Проверять имеет смысл на кнопке, найденной ранее, а не на выдуманном имени.
 if (btn && btn.name) {

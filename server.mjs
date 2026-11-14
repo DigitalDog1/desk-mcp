@@ -47,9 +47,9 @@ function fail(e) {
     }],
   };
 }
-const R = (fn) => async (args) => {
+const R = (fn) => async (args, extra) => {
   try {
-    return await fn(args);
+    return await fn(args, extra);
   } catch (e) {
     return fail(e);
   }
@@ -90,7 +90,7 @@ function uiKey(tool, a) {
 // паузой 30 с при пяти зависаниях подряд выполняется ДО постановки таймера,
 // и объявленный бюджет в 8 с превращался в реальные 30+ с.
 
-async function callUi(tool, args, timeoutMs = UI_TIMEOUT_MS) {
+async function callUi(tool, args, timeoutMs = UI_TIMEOUT_MS, options) {
   const key = uiKey(tool, args);
   const until = uiSuspect.get(key);
   const now = Date.now();
@@ -107,14 +107,15 @@ async function callUi(tool, args, timeoutMs = UI_TIMEOUT_MS) {
     );
   }
   try {
-    const r = await worker.call(tool, args, timeoutMs);
+    const r = await worker.call(tool, args, timeoutMs, options);
     uiSuspect.delete(key);
     return r;
   } catch (e) {
-    if (/не ответил|не успел/.test(e.message || "")) {
+    if (e.code === "Timeout" || /не ответил|не успел/.test(e.message || "")) {
+      worker.kill(); // Also terminate an abandoned native STA job after its own timeout.
       uiSuspect.set(key, Date.now() + UI_COOLDOWN_MS);
       throw errWith(
-        `UI Automation зависла на '${key}': нет ответа ${timeoutMs / 1000} с, воркер перезапущен. ` +
+        `UI Automation зависла на '${key}': ${e.message}; воркер перезапущен. ` +
           `Окно не отвечает на UIA — следующие вызовы к нему заблокированы на ${UI_COOLDOWN_MS / 1000} с. ` +
           `Дальше: computer_screenshot + computer_ocr или другое окно.`,
         "Timeout",
@@ -134,7 +135,7 @@ const UI_TOOLS = new Set([
 
 // --- сервер -------------------------------------------------------------------
 
-const server = new McpServer({ name: "desk-mcp", version: "1.5.1" });
+const server = new McpServer({ name: "desk-mcp", version: "1.5.2" });
 
 const ok = (data) => ({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
 
@@ -338,7 +339,7 @@ reg(
     description:
       "Поднимает окно по подстроке заголовка и делает его активным. Пытается обойти " +
       "отказ SetForegroundWindow через AttachThreadInput — иначе фокус уезжает в никуда молча.",
-    inputSchema: { title: z.string(), hwnd: z.number().int().optional() },
+    inputSchema: { title: z.string().optional(), hwnd: z.number().int().optional() },
   },
   R(async (a) => ok(await worker.call("focus", a))),
 );
@@ -484,6 +485,7 @@ reg(
       "Ссылка на шаг вперёд или на непройденный путь даёт отказ с кодом InvalidArgument, " +
       "а не пустую строку.",
     inputSchema: {
+      timeoutMs: z.number().int().min(100).max(120000).default(45000).describe("Общий бюджет пакета; дедлайн клиента должен быть больше"),
       steps: z.array(z.object({
         tool: z.string().describe("имя инструмента desk-mcp"),
         args: z.record(z.string(), z.any()).optional(),
@@ -491,7 +493,7 @@ reg(
       })).min(1).max(50),
     },
   },
-  R(async (a) => ok(await runBatch(a.steps))),
+  R(async (a, extra) => ok(await runBatch(a.steps, a.timeoutMs, extra?.signal))),
 );
 
 // Пачка исполняется на стороне сервера, по одному шагу, а не рекурсией внутри
@@ -521,7 +523,7 @@ const TOOL_ALIAS = {
 // В сегментах пути кириллица разрешена: \w в JS её не покрывает, и ссылка с
 // русским именем поля молча не сматчилась бы, а её текст ушёл бы в действие.
 
-async function runBatch(steps, budgetMs = 120_000) {
+async function runBatch(steps, budgetMs = 45_000, signal) {
   const expires = Date.now() + budgetMs;
   const out = [];
   let stoppedAt = null;
@@ -554,6 +556,7 @@ async function runBatch(steps, budgetMs = 120_000) {
       continue;
     }
     try {
+      if (signal?.aborted) throw errWith("Пакет отменён клиентом", "Cancelled");
       args = resolveArgs(args, out);
       const parsed = toolSchemas.get(canonical)?.safeParse(args);
       if (!parsed?.success) throw errWith("Некорректные аргументы " + canonical + ": " + (parsed?.error?.message ?? "нет схемы"), "InvalidArgument");
@@ -565,12 +568,12 @@ async function runBatch(steps, budgetMs = 120_000) {
         : tool === "wait_element" ? args.timeoutMs + 2000
         : UI_TOOLS.has(tool) ? UI_TIMEOUT_MS : 60_000;
       const data = UI_TOOLS.has(tool)
-        ? await callUi(tool, args, Math.min(remaining, Math.max(UI_TIMEOUT_MS, budget)))
-        : await worker.call(tool, args, Math.min(remaining, budget));
+        ? await callUi(tool, args, Math.min(remaining, Math.max(UI_TIMEOUT_MS, budget)), { signal })
+        : await worker.call(tool, args, Math.min(remaining, budget), { signal });
       out.push({ index: i, tool: given, ok: true, data });
     } catch (e) {
       out.push({ index: i, tool: given, ok: false, code: e.code || "WorkerError", error: e.message });
-      if (stopOnError) { stoppedAt = i; break; }
+      if (stopOnError || e.code === "Cancelled" || Date.now() >= expires) { stoppedAt = i; break; }
     }
   }
   return {
@@ -785,7 +788,8 @@ reg(
       "MoveWindow по подстроке заголовка. Для перемещения не передавай width/height — размер " +
       "сохранится. Возвращает запрошенную и фактическую геометрию, чтобы проверить результат.",
     inputSchema: {
-      title: z.string(),
+      title: z.string().optional(),
+      hwnd: z.number().int().optional(),
       x: z.number().int().optional(),
       y: z.number().int().optional(),
       width: z.number().int().min(1).optional(),
