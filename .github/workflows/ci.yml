@@ -38,3 +38,45 @@ jobs:
           if (-not $json.ok -or -not $json.data.nativeUia) { throw 'Native UIA layer failed to compile' }
       - run: npm run test:smoke
       - run: npm run check:package
+
+  input:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: candidate
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            candidate/package-lock.json
+            baseline/package-lock.json
+      - run: npm ci --no-fund
+      - run: npm ci --no-fund
+        working-directory: baseline
+      - name: Verify input against independent fixture state
+        run: npm run test:hardening
+      - name: Compare addressed input with the base commit
+        run: npm run bench:input
+        env:
+          BENCH_REPEAT: '20'
+          BENCH_BASELINE_ROOT: ${{ github.workspace }}/baseline
+          BENCH_OUTPUT: ${{ github.workspace }}/benchmark-input-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verified-input-benchmark
+          path: benchmark-input-results.json
+          if-no-files-found: ignore

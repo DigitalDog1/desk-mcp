@@ -62,3 +62,4 @@ bench-last.json
 !check-docs.mjs
 !check-package.mjs
 /benchmark-results.json
+/benchmark-input-results.json

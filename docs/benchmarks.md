@@ -55,3 +55,24 @@ Historical one-off agent observations remain in benchmark-tasks.md for context. 
 The full task succeeded in all 20 measured runs. The screenshot row measures capture only, not finding the largest file from an image. The filtered tree was larger and slower than the table; cached find is reported separately. These results describe this fixture on this machine, not all Windows apps.
 
 Полная задача выполнена в 20 из 20 измерений. Строка screenshot — только захват, без поиска крупнейшего файла по картинке. Фильтрованное дерево оказалось больше и медленнее таблицы; поиск с кэшем показан отдельно. Это результаты конкретного стенда на этой машине.
+
+## Addressed input / Адресный ввод
+
+Run `npm run bench:input` from an unlocked interactive Windows session. The harness opens disposable windows, changes their focus and clipboard text, and verifies the actual text committed by the fixture. Clipboard text is restored; other clipboard formats are not preserved.
+
+~~~powershell
+$env:BENCH_REPEAT = '20'
+$env:BENCH_BASELINE_ROOT = 'C:/tools/desk-mcp-baseline'
+$env:BENCH_OUTPUT = 'benchmark-input-results.json'
+npm run bench:input
+~~~
+
+Install dependencies in both checkouts first. Omit `BENCH_BASELINE_ROOT` for a standalone candidate run. Two worker sessions are kept separate, including their element references. After two warmups, the harness alternates implementations and rotates four cases: `type` and `paste`, addressed by window/selector or by `elementId`. Activating the other window and resolving references happen outside the timed call. Each sample uses fresh text containing Cyrillic and an emoji.
+
+MCP-call latency is measured separately from the independent fixture-state check. A sample must retain the full returned element description and match the fixture's value, foreground HWND and unchanged unrelated window. Failed samples remain in the report and fail the command; successful latency summaries use p50/p95. Startup, raw samples, environment and source hashes are recorded. The pull-request Windows job runs the same harness against the base and candidate checkouts on one runner and uploads its report; no fixed speedup threshold substitutes for correctness.
+
+The native input optimization removes unused metadata collection: the ordinary successful `type` path constructs two complete descriptions instead of seven, and nonempty `paste` constructs two instead of eight. These are code-path counts, not measured speedup ratios. Verification now uses a 1500 ms monotonic settling window, so faster polls do not reduce it to ten cheap attempts. Rejected input can take longer to report; an in-flight UIA call remains subject to the native/server deadlines.
+
+Для сравнения версий установите зависимости в обоих клонах и задайте `BENCH_BASELINE_ROOT`; без него измеряется только текущая версия. После двух прогревов чередуются версии и четыре сценария: `type`/`paste` по селектору и по `elementId`. Перед каждым вызовом активно другое тестовое окно; подготовка выполняется вне таймера. Проверяются полные метаданные ответа и независимо записанное приложением состояние. Ошибки сохраняются в отчёте и дают ненулевой код выхода. Время MCP-вызова отделено от ожидания независимой проверки; отчёт содержит сырые результаты, p50/p95, сведения о системе и хеши исходников.
+
+Два полных описания элемента вместо семи-восьми — количество операций в коде, а не обещанный коэффициент ускорения. Для вывода о скорости нужен фактический отчёт. При отклонённом вводе явное окно ожидания 1500 мс может увеличить время отказа. Бенчмарк меняет фокус и буфер обмена только для своих окон; восстанавливается текст буфера, остальные форматы не сохраняются.

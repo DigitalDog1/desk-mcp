@@ -98,6 +98,8 @@ For smaller trees, use `maxDepth: 4, interactiveOnly: true, compact: true`. For 
 
 `computer_set_value` defaults to ValuePattern without focus. Modes `type` and `paste` activate the addressed window, check field focus and verify the resulting value through ValuePattern. A mismatch returns `InputNotVerified`; inspect state before retrying. `computer_type` sends input to the **currently focused** control and returns `verified: false`. Paste uses the clipboard.
 
+Addressed input polls for the expected value immediately, then at intervals of up to 50 ms within a 1500 ms settling window. A match returns immediately with the complete element description. A blocked UIA call is still governed by the native and server deadlines; the settling window is not a total call timeout. Rejected input may take longer to report than under the former ten-attempt loop.
+
 ## The same window with the cursor
 
 ![the same window driven by coordinates: the cursor walks, and a WinForms button ignores an instant click](docs/demo-cursor.gif)
@@ -153,6 +155,8 @@ Set these in the server entry's `env` object:
 ## Benchmarks
 
 See [method and reproducible results](docs/benchmarks.md). Reading latency, response size and completed-task latency are separate measurements. No simulated screenshot agent or invented LLM delay is used.
+
+Run `npm run bench:input` on an unlocked desktop to measure verified `type`/`paste` input. Set `BENCH_BASELINE_ROOT` to another installed checkout for an alternating comparison against that version on the same fixture. The benchmark uses disposable windows and the clipboard; it restores clipboard text only.
 
 ## Development
 

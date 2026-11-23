@@ -1065,6 +1065,11 @@ public static class UiaNative
 
     private static string ExecuteAct(AutomationElement el, string ct, string action, string value, string elementId)
     {
+        // These actions are internal to addressed keyboard input. Their callers
+        // need a live focus/value check, not a full description on every poll.
+        if (action == "focus" || action == "check_focus" || action == "verify_value")
+            return ExecuteInputCheck(el, ct, action, value, elementId);
+
         string info = ElementInfoJson(el, ct, elementId);
 
         // Ложное «сработало» хуже отказа: InvokePattern на
@@ -1075,16 +1080,6 @@ public static class UiaNative
         if (!enabled) return "{\"status\":\"disabled\",\"element\":" + info + "}";
 
         if (action == "describe") return "{\"status\":\"ok\",\"element\":" + info + "}";
-        if (action == "check_focus") {
-            bool focused = Automation.Compare(el, AutomationElement.FocusedElement);
-            return "{\"status\":\"ok\",\"focused\":" + (focused ? "true" : "false") + ",\"element\":" + info + "}";
-        }
-        if (action == "verify_value") {
-            ValuePattern vp = el.GetCurrentPattern(ValuePattern.Pattern) as ValuePattern;
-            if (vp == null) return "{\"status\":\"noPattern\"}";
-            bool matches = (vp.Current.Value ?? "").Replace("\r\n", "\n") == (value ?? "").Replace("\r\n", "\n");
-            return "{\"status\":\"ok\",\"matches\":" + (matches ? "true" : "false") + ",\"element\":" + ElementInfoJson(el, ct, elementId) + "}";
-        }
 
         if (action == "invoke")
         {
@@ -1121,16 +1116,45 @@ public static class UiaNative
             return SelectJson(el, ct, info, value);
         }
 
+        return "{\"status\":\"unknownAction\",\"error\":" + J(action) + "}";
+    }
+
+    private static string ExecuteInputCheck(AutomationElement el, string ct, string action,
+                                             string value, string elementId)
+    {
+        // Keep this check fresh even when elementId came from an earlier call.
+        // A disabled control must never pass an input or verification probe.
+        bool enabled;
+        try { enabled = el.Current.IsEnabled; } catch (Exception) { enabled = false; }
+        if (!enabled) return "{\"status\":\"disabled\"}";
+
+        if (action == "check_focus")
+        {
+            bool focused = Automation.Compare(el, AutomationElement.FocusedElement);
+            return "{\"status\":\"ok\",\"focused\":" + (focused ? "true" : "false") + "}";
+        }
+
+        if (action == "verify_value")
+        {
+            ValuePattern vp = el.GetCurrentPattern(ValuePattern.Pattern) as ValuePattern;
+            if (vp == null) return "{\"status\":\"noPattern\"}";
+            bool matches = (vp.Current.Value ?? "").Replace("\r\n", "\n") == (value ?? "").Replace("\r\n", "\n");
+            if (!matches) return "{\"status\":\"ok\",\"matches\":false}";
+            // This is the final result returned to the MCP caller. Preserve all
+            // element metadata, but only build it after verification succeeds.
+            return "{\"status\":\"ok\",\"matches\":true,\"element\":" + ElementInfoJson(el, ct, elementId) + "}";
+        }
+
         if (action == "focus")
         {
             try
             {
                 el.SetFocus();
-                return "{\"status\":\"ok\",\"via\":\"SetFocus\",\"element\":" + info + "}";
+                return "{\"status\":\"ok\",\"via\":\"SetFocus\"}";
             }
             catch (Exception ex)
             {
-                return "{\"status\":\"error\",\"error\":" + J(ex.Message) + ",\"element\":" + info + "}";
+                return "{\"status\":\"error\",\"error\":" + J(ex.Message) + "}";
             }
         }
 
