@@ -98,7 +98,7 @@ For smaller trees, use `maxDepth: 4, interactiveOnly: true, compact: true`. For 
 
 `computer_set_value` defaults to ValuePattern without focus. Modes `type` and `paste` activate the addressed window, check field focus and verify the resulting value through ValuePattern. A mismatch returns `InputNotVerified`; inspect state before retrying. `computer_type` sends input to the **currently focused** control and returns `verified: false`. Paste uses the clipboard.
 
-Addressed input polls for the expected value immediately, then at intervals of up to 50 ms within a 1500 ms settling window. A match returns immediately with the complete element description. A blocked UIA call is still governed by the native and server deadlines; the settling window is not a total call timeout. Rejected input may take longer to report than under the former ten-attempt loop.
+Addressed input polls for the expected value immediately, then at intervals of up to 50 ms within a 1500 ms settling window. A match returns immediately with the complete element description. A blocked UIA call is still governed by the native and server deadlines; the settling window is not a total call timeout. This is an explicit timing policy, not an equivalent replacement for ten attempts: rejected input may take longer to report, while a slow provider that previously kept those attempts running beyond 1500 ms can now miss a later application commit.
 
 ## The same window with the cursor
 

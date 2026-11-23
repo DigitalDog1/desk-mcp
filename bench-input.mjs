@@ -7,6 +7,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { summarize } from "./lib/stats.mjs";
+import { readClipboardText } from "./lib/clipboard-snapshot.mjs";
 
 // Compare complete addressed-input calls against independently observed GUI state.
 // Both implementations use the same fixture, one at a time; elementIds stay local
@@ -40,11 +41,13 @@ const report = {
   repeat, warmups,
   method: {
     latency: "MCP computer_set_value call only; preparation and oracle wait excluded",
-    percentiles: "Successful measured samples only; any failure, including a warmup, fails the run",
+    percentiles: "p50/p95 use nearest-rank on successful measured samples; any failure, including a warmup, fails the run",
+    median: "Middle sorted sample for odd counts; average of the two middle samples for even counts",
     oracle: "Fixture writes its actual text and foreground HWND independently of UIA",
     order: "Rotate cases each round and alternate baseline/candidate order within each pair",
     startState: "Target B is in the background; fixture A has foreground focus",
-    clipboard: "Original clipboard text is restored; other clipboard formats are not preserved",
+    clipboard: "A strict text snapshot is required before input; original text is restored, other formats are not preserved",
+    pasteComparison: "Both workers share the clipboard; alternating writers can produce mixed latency distributions that do not represent single-worker paste performance",
     sourceHashFormat: "UTF-8 text with LF line endings (BOM preserved)",
   },
   implementations: [],
@@ -208,8 +211,11 @@ function summarizeReport() {
       const baseline = report.summary.baseline[testCase.name].latencyMs;
       const candidate = report.summary.candidate[testCase.name].latencyMs;
       return [testCase.name, baseline && candidate ? {
+        baselineMedianMs: baseline.median, candidateMedianMs: candidate.median,
         baselineP50Ms: baseline.p50, candidateP50Ms: candidate.p50,
         baselineP95Ms: baseline.p95, candidateP95Ms: candidate.p95,
+        medianSavedMs: baseline.median - candidate.median,
+        medianSpeedup: candidate.median > 0 ? baseline.median / candidate.median : null,
         p50SavedMs: baseline.p50 - candidate.p50,
         p50Speedup: candidate.p50 > 0 ? baseline.p50 / candidate.p50 : null,
       } : null];
@@ -232,7 +238,7 @@ try {
   if (directories.length === 2 && directories[0].root.toLowerCase() === directories[1].root.toLowerCase()) {
     throw new Error("BENCH_BASELINE_ROOT must point to a separate baseline checkout");
   }
-  report.harnessSourceSha256 = await hashSources(root, ["bench-input.mjs", "test/fixtures/hardening.ps1", "lib/stats.mjs"]);
+  report.harnessSourceSha256 = await hashSources(root, ["bench-input.mjs", "test/fixtures/hardening.ps1", "lib/stats.mjs", "lib/clipboard-snapshot.mjs"]);
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
   scratch = await fs.mkdtemp(path.join(os.tmpdir(), "desk-input-bench-"));
@@ -270,7 +276,9 @@ try {
     const selftest = (await call(implementation, "selftest")).data;
     assert.equal(selftest.nativeUia, true, "Native UIA is unavailable: " + selftest.nativeUiaError);
     if (!clipboardCaptured) {
-      clipboardText = (await call(implementation, "clipboard_get")).data.text ?? "";
+      // clipboard_get historically converts read failures to empty text. A
+      // benchmark must not overwrite a clipboard it could not back up.
+      clipboardText = await readClipboardText();
       clipboardCaptured = true;
     }
     const found = (await call(implementation, "find", { hwnd: fixtureB.hwnd, id: "txtMain", requireUnique: true })).data;
@@ -339,6 +347,7 @@ try {
     console.table(Object.entries(report.summary).flatMap(([implementation, summaries]) =>
       Object.entries(summaries).map(([name, summary]) => ({
         implementation, case: name, passed: summary.passed, failed: summary.failed,
+        median: summary.latencyMs?.median.toFixed(1),
         p50: summary.latencyMs?.p50.toFixed(1), p95: summary.latencyMs?.p95.toFixed(1),
       }))));
     console.log("Raw results: " + output);
