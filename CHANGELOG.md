@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Avoid complete element descriptions during internal focus checks and unsuccessful value-verification polls. Successful addressed input retains its full element response, live focus/enabled checks, stale-reference handling and verified ValuePattern comparison.
+- Replace the ten-attempt input verification loop with a monotonic 1500 ms settling window and early success. Failed input may wait longer, but slow providers can also stop waiting earlier than under ten expensive attempts; existing native and server deadlines still apply to blocked providers.
+- Extend disposable-window regression coverage for complete input metadata, reused/stale element references, disabled/read-only fields, rejected type/paste and an application committing a paste after 700 ms.
+- Add an alternating baseline/candidate input benchmark with independent application-state checks, raw samples and source hashes. Report the sample median separately from nearest-rank percentiles and abort before input if clipboard text cannot be backed up. Run Windows input regression and comparison in pull-request CI; publish measured results as a workflow artifact.
+
 ## 1.5.2 — 2026-11-14
 
 - Move to click coordinates before pressing; focus the exact requested hwnd and verify foreground ownership. Use the selected hwnd for resize, close, desktop routing and OCR capture too.

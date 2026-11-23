@@ -3016,11 +3016,17 @@ function Invoke-Tool {
                         if ($n -ne $val.Length * 2) { Fail 'InputBlocked' 'SendInput принял не весь текст' }
                     }
                     $verified = $null
-                    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+                    # Keep the settling window independent of the cost of a UIA
+                    # probe. Lightweight checks must not exhaust ten attempts
+                    # before a delayed application has accepted the input.
+                    $verifyDeadline = (Get-MonoMs) + 1500
+                    do {
                         $verified = Invoke-UiAct 'verify_value' $targetArgs $depth 1
                         if ($verified -and $verified.matches) { break }
-                        Start-Sleep -Milliseconds 50
-                    }
+                        $remaining = $verifyDeadline - (Get-MonoMs)
+                        if ($remaining -le 0) { break }
+                        Start-Sleep -Milliseconds ([Math]::Min(50, $remaining))
+                    } while ((Get-MonoMs) -lt $verifyDeadline)
                     if (-not $verified -or -not $verified.matches) {
                         Fail 'InputNotVerified' 'Ввод был отправлен, но значение поля не подтверждено; перечитай состояние перед повтором'
                     }

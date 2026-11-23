@@ -35,6 +35,28 @@ async function call(name, args = {}, options) {
   return JSON.parse(text);
 }
 function success(data) { assert.equal(data.error, undefined, data.error); return data; }
+function verifiedInput(data, { inputMode, hwnd, value, elementId, id = "txtMain" }) {
+  assert.equal(data.verified, true);
+  assert.equal(data.via, inputMode);
+  assert.equal(data.value, value);
+  const element = data.element;
+  assert.ok(element, "Verified input must retain the complete element description");
+  assert.match(element.elementId, /^el_[a-f0-9]+_\d+$/);
+  if (elementId) assert.equal(element.elementId, elementId);
+  assert.equal(element.hwnd, hwnd);
+  assert.equal(element.id, id);
+  assert.equal(element.type, "Edit");
+  assert.equal(typeof element.name, "string");
+  assert.equal(typeof element.class, "string");
+  assert.ok(element.class.length > 0);
+  assert.equal(element.enabled, true);
+  assert.equal(typeof element.offscreen, "boolean");
+  assert.ok(Array.isArray(element.patterns) && element.patterns.includes("ValuePattern"));
+  assert.equal(element.value, value);
+  assert.equal(element.readOnly, false);
+  for (const coordinate of ["x", "y", "w", "h"]) assert.ok(Number.isFinite(element.rect?.[coordinate]), coordinate);
+  assert.ok(element.rect.w > 0 && element.rect.h > 0);
+}
 const passed = [];
 async function check(name, fn) { await fn(); passed.push(name); console.log("PASS " + name); }
 let clipboard;
@@ -73,27 +95,50 @@ try {
     await until("B", s => s.x === 900 && s.y === 180 && s.width === 700 && s.height === 650);
     assert.equal((await state("A")).x, 80);
   });
-  for (const inputMode of ["type", "paste"]) await check(inputMode + " activates and verifies the background target", async () => {
+  let inputElementId;
+  for (const inputMode of ["type", "paste"]) await check(inputMode + " activates the background target and retains verified metadata", async () => {
     success(await call("focus", { hwnd: A.hwnd }));
     await until("A", s => s.foreground === A.hwnd);
     const value = inputMode + " Привет 😀";
-    const result = success(await call("set_value", { hwnd: B.hwnd, id: "txtMain", inputMode, value }));
-    assert.equal(result.verified, true);
+    // Reuse the returned live reference on the second call; no new find is needed.
+    const target = inputElementId ? { elementId: inputElementId } : { hwnd: B.hwnd, id: "txtMain" };
+    const result = success(await call("set_value", { ...target, inputMode, value }));
+    verifiedInput(result, { inputMode, hwnd: B.hwnd, value, elementId: inputElementId });
+    inputElementId = result.element.elementId;
     await until("B", s => s.value === value && s.foreground === B.hwnd);
     assert.equal((await state("A")).value, "seed");
   });
   await check("empty paste clears the addressed field", async () => {
-    const result = success(await call("set_value", { hwnd: B.hwnd, id: "txtMain", inputMode: "paste", value: "" }));
-    assert.equal(result.verified, true);
+    const result = success(await call("set_value", { elementId: inputElementId, inputMode: "paste", value: "" }));
+    verifiedInput(result, { inputMode: "paste", hwnd: B.hwnd, value: "", elementId: inputElementId });
     await until("B", s => s.value === "");
   });
-  await check("read-only input is rejected before sending keys", async () => {
-    assert.equal((await call("set_value", { hwnd: B.hwnd, id: "txtReadonly", inputMode: "type", value: "must-not-claim-success" })).code, "PatternUnavailable");
+  await check("paste waits for the application to commit its value before reporting success", async () => {
+    const before = await state("B");
+    const value = "Delayed commit Привет 😀";
+    const result = success(await call("set_value", { hwnd: B.hwnd, id: "txtDelayedPaste", inputMode: "paste", value }));
+    verifiedInput(result, { inputMode: "paste", hwnd: B.hwnd, id: "txtDelayedPaste", value });
+    await until("B", s => s.delayedValue === value && s.delayedCommits === before.delayedCommits + 1);
+    assert.equal((await state("A")).value, "seed");
   });
-  await check("rejected keyboard input never returns a false success", async () => {
-    const outcome = await call("set_value", { hwnd: B.hwnd, id: "txtDigits", inputMode: "type", value: "rejected" });
+  for (const inputMode of ["type", "paste"]) await check(inputMode + " refuses read-only and disabled fields before changing focus or text", async () => {
+    success(await call("focus", { hwnd: A.hwnd }));
+    await until("A", s => s.foreground === A.hwnd);
+    for (const [id, code] of [["txtReadonly", "PatternUnavailable"], ["txtDisabled", "ElementDisabled"]]) {
+      const result = await call("set_value", { hwnd: B.hwnd, id, inputMode, value: "must-not-claim-success" });
+      assert.equal(result.code, code, id);
+      assert.equal((await state("A")).value, "seed");
+      const other = await state("B");
+      assert.equal(other.value, "");
+      assert.equal(other.readOnlyValue, "immutable");
+      assert.equal(other.disabledValue, "disabled-seed");
+      assert.equal(success(await call("active_window")).handle, A.hwnd);
+    }
+  });
+  for (const inputMode of ["type", "paste"]) await check("rejected " + inputMode + " input never returns a false success", async () => {
+    const outcome = await call("set_value", { hwnd: B.hwnd, id: "txtDigits", inputMode, value: "rejected" });
     assert.equal(outcome.code, "InputNotVerified");
-    assert.equal((await state("B")).digits, "");
+    await until("B", s => s.digits === "");
     assert.equal((await state("A")).value, "seed");
   });
   await check("large lists do not hide neighboring shallow controls", async () => {
@@ -139,10 +184,19 @@ try {
     await sleep(1100); assert.equal((await state("B")).value, before);
   });
   await check("closing a secondary hwnd leaves the first window alive", async () => {
+    // Earlier cancellation tests restart the worker, so capture a reference from this session.
+    inputElementId = success(await call("find", { hwnd: B.hwnd, id: "txtMain" })).elements[0].elementId;
     success(await call("focus", { hwnd: A.hwnd }));
     await until("A", s => s.foreground === A.hwnd);
     success(await call("close_window", { hwnd: B.hwnd, confirm: true }));
     await until("A", s => s.otherClosed === true);
+  });
+  await check("stale element references cannot redirect keyboard input", async () => {
+    for (const inputMode of ["type", "paste"]) {
+      const result = await call("set_value", { elementId: inputElementId, inputMode, value: "must-not-reach-A" });
+      assert.equal(result.code, "ElementNotFound");
+      assert.equal((await state("A")).value, "seed");
+    }
   });
   // Restore the clipboard before deliberately blocking the fixture's UI thread.
   if (clipboard) { success(await call("clipboard_set", { text: clipboard.text ?? "" })); clipboard = undefined; }
